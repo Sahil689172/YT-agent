@@ -39,7 +39,7 @@ This workflow is now locked and will remain the foundation of the project.
 * Ollama: Installed
 * Model: Llama 3
 * FFmpeg: Installed
-* Cursor Pro: Available
+  
 
 ---
 
