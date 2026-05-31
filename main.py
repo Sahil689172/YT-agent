@@ -1,14 +1,37 @@
-"""CLI entry point for YouTube Shorts script generation."""
+"""CLI entry point for YouTube Shorts Phase 1–2: script, metadata, and voice."""
 
+import logging
 import sys
 
+from metadata_generator import (
+    MetadataGenerator,
+    MetadataGeneratorError,
+    MetadataOllamaConnectionError,
+    MetadataOllamaModelError,
+    MetadataValidationError,
+)
 from script_generator import (
+    FALLBACK_MAX_WORDS,
+    FALLBACK_MIN_WORDS,
+    MAX_WORDS,
+    MIN_WORDS,
     OllamaConnectionError,
     OllamaModelError,
     ScriptGenerator,
     ScriptGeneratorError,
     ScriptValidationError,
 )
+from voice_generator import (
+    PiperNotFoundError,
+    ScriptNotFoundError,
+    VoiceGenerationError,
+    VoiceGenerator,
+    VoiceGeneratorError,
+    VoiceModelNotFoundError,
+)
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 
 def read_topic() -> str:
@@ -28,10 +51,13 @@ def main() -> int:
         print("Error: Topic cannot be empty.", file=sys.stderr)
         return 1
 
-    generator = ScriptGenerator()
+    script_generator = ScriptGenerator()
+    metadata_generator = MetadataGenerator()
+    voice_generator = VoiceGenerator()
 
     try:
-        script, path = generator.generate_and_save(topic)
+        logger.info("Phase 1: generating script")
+        script, raw_path, formatted_path = script_generator.generate_and_save(topic)
     except OllamaConnectionError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -40,14 +66,68 @@ def main() -> int:
         return 1
     except ScriptValidationError as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        print("Tip: Try running again; model output can vary.", file=sys.stderr)
         return 1
     except ScriptGeneratorError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     word_count = len(script.split())
-    print(f"Script saved ({word_count} words) -> {path}")
+    if MIN_WORDS <= word_count <= MAX_WORDS:
+        range_note = f"target {MIN_WORDS}-{MAX_WORDS}"
+    elif FALLBACK_MIN_WORDS <= word_count <= FALLBACK_MAX_WORDS:
+        range_note = f"accepted fallback {FALLBACK_MIN_WORDS}-{FALLBACK_MAX_WORDS}"
+    else:
+        range_note = f"outside {MIN_WORDS}-{MAX_WORDS}"
+    print(f"Script saved — final word count: {word_count} ({range_note})")
+    print(f"  Readable: {formatted_path}")
+    print(f"  Debug:    {raw_path}")
+
+    try:
+        logger.info("Phase 1: generating metadata")
+        metadata, title_path, description_path, hashtags_path = (
+            metadata_generator.generate_and_save(script, topic)
+        )
+    except MetadataOllamaConnectionError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except MetadataOllamaModelError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except MetadataValidationError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        print("Tip: Try running again; model output can vary.", file=sys.stderr)
+        return 1
+    except MetadataGeneratorError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print("Metadata saved")
+    print(f"  Title:       {title_path}")
+    print(f"  Description: {description_path}")
+    print(f"  Hashtags:    {hashtags_path}")
+    print(f"  Title preview: {metadata.title}")
+
+    try:
+        logger.info("Phase 2: generating voice narration")
+        print("\nPhase 2 — Voice generation")
+        audio_path = voice_generator.generate()
+    except PiperNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except VoiceModelNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except ScriptNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except VoiceGenerationError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except VoiceGeneratorError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"\nVoice saved -> {audio_path}")
     return 0
 
 

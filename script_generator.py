@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import textwrap
 from pathlib import Path
 
 import ollama
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_MODEL = "llama3"
 MIN_WORDS = 80
 MAX_WORDS = 120
+FALLBACK_MIN_WORDS = 70
+FALLBACK_MAX_WORDS = 150
+MAX_REGENERATIONS = 3
+MAX_GENERATION_ATTEMPTS = 1 + MAX_REGENERATIONS
 DEFAULT_OUTPUT = Path("scripts/output.txt")
+DEFAULT_FORMATTED = Path("scripts/script.txt")
+WRAP_WIDTH = 90
 
 SYSTEM_PROMPT = """You write spoken-word scripts for YouTube Shorts.
 Output ONLY the script text the speaker says aloud.
@@ -43,6 +53,55 @@ class ScriptValidationError(ScriptGeneratorError):
     """Generated script failed length or format checks."""
 
 
+def clean_script_text(text: str, wrap_width: int = WRAP_WIDTH) -> str:
+    """Format script for readability without changing words or order."""
+    text = text.strip()
+    if not text:
+        return ""
+
+    blocks = [block.strip() for block in re.split(r"\n\s*\n+", text) if block.strip()]
+    if not blocks:
+        blocks = [text]
+
+    paragraphs: list[str] = []
+    for block in blocks:
+        normalized = re.sub(r"[^\S\n]+", " ", block).strip()
+        sentences = _split_sentences(normalized)
+        if not sentences:
+            continue
+        if len(sentences) == 1:
+            paragraphs.append(sentences[0])
+        else:
+            paragraphs.extend(_group_sentences(sentences))
+
+    wrapped = [
+        textwrap.fill(
+            paragraph,
+            width=wrap_width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        for paragraph in paragraphs
+    ]
+    return "\n\n".join(wrapped) + "\n"
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split on sentence boundaries while preserving each sentence verbatim."""
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _group_sentences(sentences: list[str]) -> list[str]:
+    """Merge sentences into readable paragraphs without altering wording."""
+    if len(sentences) <= 1:
+        return sentences
+    if len(sentences) <= 4:
+        mid = (len(sentences) + 1) // 2
+        return [" ".join(sentences[:mid]), " ".join(sentences[mid:])]
+    return [" ".join(sentences[i : i + 2]) for i in range(0, len(sentences), 2)]
+
+
 class ScriptGenerator:
     """Generate and persist YouTube Shorts scripts using Ollama."""
 
@@ -50,20 +109,81 @@ class ScriptGenerator:
         self,
         model: str = DEFAULT_MODEL,
         output_path: Path | str = DEFAULT_OUTPUT,
+        formatted_path: Path | str = DEFAULT_FORMATTED,
         min_words: int = MIN_WORDS,
         max_words: int = MAX_WORDS,
     ) -> None:
         self.model = model
         self.output_path = Path(output_path)
+        self.formatted_path = Path(formatted_path)
         self.min_words = min_words
         self.max_words = max_words
 
     def generate(self, topic: str) -> str:
-        """Generate a script for the given topic."""
+        """Generate a script for the given topic with automatic length retries."""
         topic = topic.strip()
         if not topic:
             raise ScriptGeneratorError("Topic cannot be empty.")
 
+        last_script: str | None = None
+        last_count = 0
+
+        for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
+            if attempt > 1:
+                logger.info(
+                    "Regenerating script (attempt %d/%d); previous length was %d words",
+                    attempt,
+                    MAX_GENERATION_ATTEMPTS,
+                    last_count,
+                )
+
+            script = self._request_script(topic)
+            last_script = script
+            last_count = self._word_count(script)
+            self._validate_forbidden_content(script)
+
+            if self.min_words <= last_count <= self.max_words:
+                if attempt > 1:
+                    logger.info(
+                        "Script accepted on attempt %d (%d words)",
+                        attempt,
+                        last_count,
+                    )
+                return script
+
+            if attempt < MAX_GENERATION_ATTEMPTS:
+                logger.warning(
+                    "Script length %d words (expected %d-%d); regenerating (%d/%d retries left)",
+                    last_count,
+                    self.min_words,
+                    self.max_words,
+                    MAX_GENERATION_ATTEMPTS - attempt,
+                    MAX_REGENERATIONS,
+                )
+                continue
+
+        assert last_script is not None
+        if FALLBACK_MIN_WORDS <= last_count <= FALLBACK_MAX_WORDS:
+            logger.warning(
+                "Script length %d words still outside %d-%d after %d attempts; "
+                "accepting fallback range %d-%d",
+                last_count,
+                self.min_words,
+                self.max_words,
+                MAX_GENERATION_ATTEMPTS,
+                FALLBACK_MIN_WORDS,
+                FALLBACK_MAX_WORDS,
+            )
+            return last_script
+
+        raise ScriptValidationError(
+            f"Script length is {last_count} words after {MAX_GENERATION_ATTEMPTS} attempts; "
+            f"expected {self.min_words}-{self.max_words} "
+            f"(or fallback {FALLBACK_MIN_WORDS}-{FALLBACK_MAX_WORDS})."
+        )
+
+    def _request_script(self, topic: str) -> str:
+        """Call Ollama once and return a cleaned script."""
         try:
             response = ollama.chat(
                 model=self.model,
@@ -93,25 +213,30 @@ class ScriptGenerator:
         if not raw:
             raise ScriptGeneratorError("Ollama returned an empty response.")
 
-        script = self._clean_script(raw)
-        self._validate_script(script)
-        return script
+        return self._clean_script(raw)
 
-    def save(self, script: str, path: Path | str | None = None) -> Path:
-        """Write script to disk, creating parent directories if needed."""
-        target = Path(path) if path is not None else self.output_path
+    def save(self, script: str) -> tuple[Path, Path]:
+        """Save raw script for debugging and a formatted copy for reading."""
+        raw_path = self.output_path
+        formatted_path = self.formatted_path
+        raw_body = script.strip() + "\n"
+        formatted_body = clean_script_text(script)
+
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(script.strip() + "\n", encoding="utf-8")
+            raw_path.parent.mkdir(parents=True, exist_ok=True)
+            formatted_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_path.write_text(raw_body, encoding="utf-8")
+            formatted_path.write_text(formatted_body, encoding="utf-8")
         except OSError as exc:
-            raise ScriptGeneratorError(f"Failed to save script to {target}: {exc}") from exc
-        return target.resolve()
+            raise ScriptGeneratorError(f"Failed to save script: {exc}") from exc
 
-    def generate_and_save(self, topic: str, path: Path | str | None = None) -> tuple[str, Path]:
-        """Generate a script and write it to the output file."""
+        return raw_path.resolve(), formatted_path.resolve()
+
+    def generate_and_save(self, topic: str) -> tuple[str, Path, Path]:
+        """Generate a script and write debug + formatted files."""
         script = self.generate(topic)
-        saved_path = self.save(script, path)
-        return script, saved_path
+        raw_path, formatted_path = self.save(script)
+        return script, raw_path, formatted_path
 
     @staticmethod
     def _word_count(text: str) -> int:
@@ -132,14 +257,8 @@ class ScriptGenerator:
                 lines.append(line)
         return " ".join(lines)
 
-    def _validate_script(self, script: str) -> None:
-        """Ensure word count and forbidden patterns."""
-        count = self._word_count(script)
-        if count < self.min_words or count > self.max_words:
-            raise ScriptValidationError(
-                f"Script length is {count} words; expected {self.min_words}-{self.max_words}."
-            )
-
+    def _validate_forbidden_content(self, script: str) -> None:
+        """Reject scripts that contain labels, directions, or host references."""
         forbidden = [
             (r"\bnarrator\s*:", "narrator labels"),
             (r"\bvoiceover\s*:", "narrator labels"),

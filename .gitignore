@@ -1,0 +1,87 @@
+# Python
+
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+.python-version
+
+# Virtual Environment
+
+venv/
+.env
+
+# Logs
+
+logs/
+*.log
+
+# Generated Audio
+
+audio/
+*.wav
+*.mp3
+
+# Generated Videos
+
+videos/
+*.mp4
+*.mov
+*.avi
+
+# Generated Thumbnails
+
+thumbnails/
+*.png
+*.jpg
+*.jpeg
+
+# Generated Captions
+
+captions/
+*.srt
+
+# Generated Scripts & Metadata
+
+scripts/output.txt
+scripts/raw_script.txt
+scripts/script.txt
+scripts/title.txt
+scripts/description.txt
+scripts/hashtags.txt
+
+# AI Models
+
+models/
+*.onnx
+*.json
+
+# Temporary Files
+
+temp/
+tmp/
+*.tmp
+
+# VS Code
+
+.vscode/
+
+# Cursor
+
+.cursor/
+
+# Windows
+
+Thumbs.db
+Desktop.ini
+
+# FFmpeg Outputs
+
+*.mkv
+
+# Future Secrets
+
+client_secret.json
+credentials.json
+token.json
+youtube_token.json
