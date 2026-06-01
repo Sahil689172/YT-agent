@@ -1,4 +1,4 @@
-"""CLI entry point for YouTube Shorts Phase 1–3: script, metadata, voice, and captions."""
+"""CLI entry point for YouTube Shorts Phase 1–4: script through video."""
 
 import logging
 import sys
@@ -29,6 +29,14 @@ from script_generator import (
     ScriptGenerator,
     ScriptGeneratorError,
     ScriptValidationError,
+)
+from video_generator import (
+    AssetNotFoundError,
+    BackgroundNotFoundError,
+    FFmpegNotFoundError as VideoFFmpegNotFoundError,
+    VideoGenerationError,
+    VideoGenerator,
+    VideoGeneratorError,
 )
 from voice_generator import (
     PiperNotFoundError,
@@ -64,6 +72,7 @@ def main() -> int:
     metadata_generator = MetadataGenerator()
     voice_generator = VoiceGenerator()
     caption_generator = CaptionGenerator()
+    video_generator = VideoGenerator()
 
     try:
         logger.info("Phase 1: generating script")
@@ -163,6 +172,28 @@ def main() -> int:
         return 1
 
     print(f"\nCaptions saved -> {srt_path}")
+
+    try:
+        logger.info("Phase 4: generating video")
+        print("\nPhase 4 — Video generation")
+        video_path = video_generator.generate()
+    except AssetNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except BackgroundNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except VideoFFmpegNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except VideoGenerationError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except VideoGeneratorError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"\nVideo saved -> {video_path}")
     return 0
 
 
