@@ -1,8 +1,17 @@
-"""CLI entry point for YouTube Shorts Phase 1–2: script, metadata, and voice."""
+"""CLI entry point for YouTube Shorts Phase 1–3: script, metadata, voice, and captions."""
 
 import logging
 import sys
 
+from caption_generator import (
+    AudioNotFoundError,
+    CaptionGenerationError,
+    CaptionGenerator,
+    CaptionGeneratorError,
+    FFmpegNotFoundError,
+    WhisperModelLoadError,
+    WhisperPackageNotFoundError,
+)
 from metadata_generator import (
     MetadataGenerator,
     MetadataGeneratorError,
@@ -11,10 +20,10 @@ from metadata_generator import (
     MetadataValidationError,
 )
 from script_generator import (
-    FALLBACK_MAX_WORDS,
-    FALLBACK_MIN_WORDS,
     MAX_WORDS,
     MIN_WORDS,
+    TARGET_MAX_WORDS,
+    TARGET_MIN_WORDS,
     OllamaConnectionError,
     OllamaModelError,
     ScriptGenerator,
@@ -54,6 +63,7 @@ def main() -> int:
     script_generator = ScriptGenerator()
     metadata_generator = MetadataGenerator()
     voice_generator = VoiceGenerator()
+    caption_generator = CaptionGenerator()
 
     try:
         logger.info("Phase 1: generating script")
@@ -72,10 +82,10 @@ def main() -> int:
         return 1
 
     word_count = len(script.split())
-    if MIN_WORDS <= word_count <= MAX_WORDS:
-        range_note = f"target {MIN_WORDS}-{MAX_WORDS}"
-    elif FALLBACK_MIN_WORDS <= word_count <= FALLBACK_MAX_WORDS:
-        range_note = f"accepted fallback {FALLBACK_MIN_WORDS}-{FALLBACK_MAX_WORDS}"
+    if TARGET_MIN_WORDS <= word_count <= TARGET_MAX_WORDS:
+        range_note = f"target {TARGET_MIN_WORDS}-{TARGET_MAX_WORDS}"
+    elif MIN_WORDS <= word_count <= MAX_WORDS:
+        range_note = f"valid {MIN_WORDS}-{MAX_WORDS}"
     else:
         range_note = f"outside {MIN_WORDS}-{MAX_WORDS}"
     print(f"Script saved — final word count: {word_count} ({range_note})")
@@ -128,6 +138,31 @@ def main() -> int:
         return 1
 
     print(f"\nVoice saved -> {audio_path}")
+
+    try:
+        logger.info("Phase 3: generating captions")
+        print("\nPhase 3 — Caption generation")
+        srt_path = caption_generator.generate()
+    except AudioNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except FFmpegNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except WhisperPackageNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except WhisperModelLoadError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except CaptionGenerationError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except CaptionGeneratorError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"\nCaptions saved -> {srt_path}")
     return 0
 
 

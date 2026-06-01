@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,9 @@ VOICE_CONFIG = Path("models/piper/en_US-ryan-high.onnx.json")
 SCRIPT_PATH = Path("scripts/script.txt")
 OUTPUT_PATH = Path("audio/output.wav")
 PROGRESS_STEPS = 5
-PIPER_TIMEOUT_SECONDS = 30
+PIPER_MIN_TIMEOUT_SECONDS = 60
+PIPER_TIMEOUT_MULTIPLIER = 1.0
+VOICE_SPEED = 1.25
 WINDOWS_DLL_EXIT_CODE = 3221225781
 
 
@@ -60,6 +63,15 @@ def resolve_piper_executable(path: Path | str | None = None) -> Path:
     return DEFAULT_PIPER_EXECUTABLE
 
 
+def calculate_piper_timeout(
+    word_count: int,
+    multiplier: float = PIPER_TIMEOUT_MULTIPLIER,
+    minimum: int = PIPER_MIN_TIMEOUT_SECONDS,
+) -> int:
+    """Compute subprocess timeout from script length (seconds)."""
+    return max(minimum, int(word_count * multiplier))
+
+
 class VoiceGenerator:
     """Generate narration WAV from scripts/script.txt via Piper."""
 
@@ -70,6 +82,8 @@ class VoiceGenerator:
         voice_config: Path | str = VOICE_CONFIG,
         script_path: Path | str = SCRIPT_PATH,
         output_path: Path | str = OUTPUT_PATH,
+        voice_speed: float = VOICE_SPEED,
+        timeout_multiplier: float = PIPER_TIMEOUT_MULTIPLIER,
     ) -> None:
         self.piper_executable = resolve_piper_executable(piper_executable)
         self.piper_dir = self.piper_executable.parent
@@ -77,6 +91,8 @@ class VoiceGenerator:
         self.voice_config = Path(voice_config)
         self.script_path = Path(script_path)
         self.output_path = Path(output_path)
+        self.voice_speed = voice_speed
+        self.timeout_multiplier = timeout_multiplier
 
     def generate(self) -> Path:
         """Read script, run Piper, and save audio/output.wav."""
@@ -165,6 +181,8 @@ class VoiceGenerator:
             str(model_path),
             "--config",
             str(config_path),
+            "--length_scale",
+            str(self.voice_speed),
             "--output_file",
             str(output_path),
         ]
@@ -172,25 +190,43 @@ class VoiceGenerator:
         logger.info("Piper executable: %s", self.piper_executable)
         logger.info("Voice model: %s", model_path)
         logger.info("Voice config: %s", config_path)
+        logger.info("Voice speed (length_scale): %s", self.voice_speed)
         logger.info("Output WAV: %s", output_path)
         logger.info("Piper command: %s", " ".join(command))
 
+        word_count = len(script_text.split())
+        timeout = calculate_piper_timeout(word_count, self.timeout_multiplier)
+        logger.info("Estimated timeout: %d seconds", timeout)
+        print(f"  Estimated timeout: {timeout} seconds", flush=True)
+
+        started_at = time.perf_counter()
         try:
             result = subprocess.run(
                 command,
                 input=script_text,
                 text=True,
                 capture_output=True,
-                timeout=PIPER_TIMEOUT_SECONDS,
+                timeout=timeout,
                 cwd=str(self.piper_dir),
                 env=self._piper_env(),
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            logger.error("Piper timed out after %d seconds", PIPER_TIMEOUT_SECONDS)
-            raise VoiceGenerationError("Piper timed out after 30 seconds") from exc
+            elapsed = time.perf_counter() - started_at
+            logger.error(
+                "Piper timed out after %.1f seconds (limit: %d seconds)",
+                elapsed,
+                timeout,
+            )
+            raise VoiceGenerationError(
+                f"Piper timed out after {timeout} seconds"
+            ) from exc
         except OSError as exc:
             raise VoiceGenerationError(f"Failed to run Piper: {exc}") from exc
+
+        elapsed = time.perf_counter() - started_at
+        logger.info("Piper execution time: %.1f seconds", elapsed)
+        print(f"  Piper finished in {elapsed:.1f} seconds", flush=True)
 
         stdout = result.stdout or ""
         stderr = result.stderr or ""

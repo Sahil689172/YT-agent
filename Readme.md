@@ -32,14 +32,52 @@ This workflow is now locked and will remain the foundation of the project.
 
 ---
 
+# Project Status
+
+| Phase | Name | Status |
+|-------|------|--------|
+| 1 | Script + metadata generation | **Complete** |
+| 2 | Voice generation (Piper TTS) | **Complete** |
+| 3 | Caption generation (OpenAI Whisper) | **Complete** |
+| 4 | Video generation | Not started |
+| 5 | Thumbnail generation | Not started |
+| 6 | YouTube upload | Not started |
+| 7 | Automation | Not started |
+
+**Current focus:** Phase 4 — Video Generation
+
+### Run the pipeline (Phases 1–3)
+
+```bash
+pip install -r requirements.txt
+python main.py "your topic here"
+```
+
+**Outputs:**
+
+```text
+scripts/script.txt          # formatted script
+scripts/output.txt          # raw script (debug)
+scripts/title.txt
+scripts/description.txt
+scripts/hashtags.txt
+audio/output.wav
+captions/output.srt
+```
+
+---
+
 # Current Hardware
 
 * RAM: 16 GB
 * Python: 3.13
 * Ollama: Installed
 * Model: Llama 3
-* FFmpeg: Installed
-  
+* FFmpeg: Installed (PATH)
+* Piper TTS: `C:/Tools/piper/piper.exe`
+* OpenAI Whisper: `base.en` (local, via Python package)
+
+---
 
 ---
 
@@ -80,7 +118,8 @@ The agent should eventually be capable of:
 
 ## Captions
 
-* Auto-generated SRT files
+* OpenAI Whisper (local Python package, `base.en` model)
+* FFmpeg (required on PATH for Whisper audio decoding and future video phases)
 
 ## Thumbnail Generation
 
@@ -100,11 +139,11 @@ The agent should eventually be capable of:
 
 ---
 
-## Phase 1 — Script Generation
+## Phase 1 — Script + Metadata Generation ✅ Complete
 
 ### Goal
 
-Convert a topic into a YouTube Shorts script.
+Convert a topic into a YouTube Shorts script and upload metadata.
 
 ### Input
 
@@ -119,33 +158,42 @@ What are stocks?
 ### Output
 
 ```text
-scripts/output.txt
+scripts/output.txt          # raw script (debug)
+scripts/script.txt          # formatted script (voice input)
+scripts/title.txt
+scripts/description.txt
+scripts/hashtags.txt
 ```
 
 ### Responsibilities
 
-* Accept topic input
-* Generate 80–120 word script
-* Remove narrator labels
-* Remove scene directions
-* Save script to file
+* Accept topic input (CLI or prompt)
+* Generate script (target 140–180 words, validated 120–200)
+* Auto-retry if word count is out of range
+* Generate title, description, and 10 hashtags from the script
+* Remove narrator labels and scene directions
+* Save all files under `scripts/`
+
+### Module
+
+`script_generator.py`, `metadata_generator.py`, `main.py`
 
 ### Deliverable
 
-Working script generator using Ollama.
+Working script and metadata pipeline using Ollama (Llama 3).
 
 ---
 
-## Phase 2 — Voice Generation
+## Phase 2 — Voice Generation ✅ Complete
 
 ### Goal
 
-Convert script into narration.
+Convert the formatted script into narration audio.
 
 ### Input
 
 ```text
-scripts/output.txt
+scripts/script.txt
 ```
 
 ### Output
@@ -156,26 +204,32 @@ audio/output.wav
 
 ### Responsibilities
 
-* Read generated script
-* Generate voice narration
+* Verify Piper executable and voice model
+* Read `scripts/script.txt`
+* Generate narration with Piper (`en_US-ryan-high`, `length_scale` 1.25)
+* Dynamic timeout based on script word count
 * Save WAV file
+
+### Module
+
+`voice_generator.py`
 
 ### Deliverable
 
-Natural sounding AI voice.
+Natural-sounding local AI voice narration.
 
 ---
 
-## Phase 3 — Caption Generation
+## Phase 3 — Caption Generation ✅ Complete
 
 ### Goal
 
-Create subtitles from generated script.
+Create subtitles from narration audio using local OpenAI Whisper.
 
 ### Input
 
 ```text
-scripts/output.txt
+audio/output.wav
 ```
 
 ### Output
@@ -184,15 +238,48 @@ scripts/output.txt
 captions/output.srt
 ```
 
+### Process
+
+```text
+audio/output.wav
+        ↓
+OpenAI Whisper (local, base.en)
+        ↓
+captions/output.srt
+```
+
 ### Responsibilities
 
-* Split script into subtitle blocks
-* Generate timestamps
-* Produce valid SRT file
+* Verify narration audio exists
+* Verify FFmpeg is available (used by Whisper for audio decoding; required for later phases)
+* Load the `base.en` Whisper model locally
+* Transcribe `audio/output.wav`
+* Write a valid SRT file to `captions/output.srt`
+
+### Setup
+
+```bash
+pip install -r requirements.txt
+```
+
+FFmpeg must be on your PATH. The first run downloads the `base.en` model automatically.
+
+### Run (Phase 3 only)
+
+After Phase 2 has produced `audio/output.wav`:
+
+```python
+from caption_generator import CaptionGenerator
+CaptionGenerator().generate()
+```
+
+### Module
+
+`caption_generator.py`
 
 ### Deliverable
 
-Ready-to-use captions.
+Ready-to-use SRT captions synced to the narration audio.
 
 ---
 
@@ -363,8 +450,10 @@ without manual intervention.
 
 # Current Focus
 
-We are currently working on:
+Phases **1–3** are complete and integrated in `main.py`:
 
-## Phase 1 — Script Generation
+```text
+Topic → Script + Metadata → Voice → Captions
+```
 
-Nothing else should be developed until Phase 1 is fully working and tested.
+Next up: **Phase 4 — Video Generation** (`audio/output.wav` + `captions/output.srt` → `videos/output.mp4`).

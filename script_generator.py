@@ -12,29 +12,29 @@ import ollama
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "llama3"
-MIN_WORDS = 80
-MAX_WORDS = 120
-FALLBACK_MIN_WORDS = 70
-FALLBACK_MAX_WORDS = 150
+TARGET_MIN_WORDS = 140
+TARGET_MAX_WORDS = 180
+MIN_WORDS = 120
+MAX_WORDS = 200
 MAX_REGENERATIONS = 3
 MAX_GENERATION_ATTEMPTS = 1 + MAX_REGENERATIONS
 DEFAULT_OUTPUT = Path("scripts/output.txt")
 DEFAULT_FORMATTED = Path("scripts/script.txt")
 WRAP_WIDTH = 90
 
-SYSTEM_PROMPT = """You write spoken-word scripts for YouTube Shorts.
+SYSTEM_PROMPT = f"""You write spoken-word scripts for YouTube Shorts.
 Output ONLY the script text the speaker says aloud.
 Rules:
-- 80 to 120 words total
+- {TARGET_MIN_WORDS} to {TARGET_MAX_WORDS} words total (about 50-60 seconds when spoken aloud)
 - No narrator labels (e.g. Narrator:, Voiceover:)
 - No scene directions or stage directions in brackets or parentheses
 - No host references (e.g. "I'm your host", "welcome back to the channel")
 - No titles, headings, bullet points, or metadata
 - Conversational, punchy, hook in the first line, strong close"""
 
-USER_PROMPT_TEMPLATE = """Write a YouTube Shorts script about: {topic}
+USER_PROMPT_TEMPLATE = f"""Write a YouTube Shorts script about: {{topic}}
 
-Remember: plain spoken script only, 80-120 words."""
+Remember: plain spoken script only, {TARGET_MIN_WORDS}-{TARGET_MAX_WORDS} words (50-60 seconds of narration)."""
 
 
 class ScriptGeneratorError(Exception):
@@ -163,23 +163,9 @@ class ScriptGenerator:
                 continue
 
         assert last_script is not None
-        if FALLBACK_MIN_WORDS <= last_count <= FALLBACK_MAX_WORDS:
-            logger.warning(
-                "Script length %d words still outside %d-%d after %d attempts; "
-                "accepting fallback range %d-%d",
-                last_count,
-                self.min_words,
-                self.max_words,
-                MAX_GENERATION_ATTEMPTS,
-                FALLBACK_MIN_WORDS,
-                FALLBACK_MAX_WORDS,
-            )
-            return last_script
-
         raise ScriptValidationError(
             f"Script length is {last_count} words after {MAX_GENERATION_ATTEMPTS} attempts; "
-            f"expected {self.min_words}-{self.max_words} "
-            f"(or fallback {FALLBACK_MIN_WORDS}-{FALLBACK_MAX_WORDS})."
+            f"expected {self.min_words}-{self.max_words}."
         )
 
     def _request_script(self, topic: str) -> str:
