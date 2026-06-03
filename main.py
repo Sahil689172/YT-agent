@@ -1,4 +1,4 @@
-"""CLI entry point for YouTube Shorts Phase 1–4.5B: script through visual assets."""
+"""CLI entry point for YouTube Shorts Phase 1–4.5C: script through timeline video."""
 
 import logging
 import sys
@@ -46,13 +46,14 @@ from script_generator import (
     ScriptGeneratorError,
     ScriptValidationError,
 )
-from video_generator import (
-    AssetNotFoundError,
-    BackgroundNotFoundError,
-    FFmpegNotFoundError as VideoFFmpegNotFoundError,
-    VideoGenerationError,
-    VideoGenerator,
-    VideoGeneratorError,
+from agents.timeline_video_builder import (
+    CaptionsNotFoundError as TimelineCaptionsNotFoundError,
+    FFmpegNotFoundError as TimelineFFmpegNotFoundError,
+    ImagesNotFoundError,
+    NarrationNotFoundError,
+    TimelineRenderError,
+    TimelineVideoBuilder,
+    TimelineVideoBuilderError,
 )
 from voice_generator import (
     PiperNotFoundError,
@@ -88,9 +89,9 @@ def main() -> int:
     metadata_generator = MetadataGenerator()
     voice_generator = VoiceGenerator()
     caption_generator = CaptionGenerator()
-    video_generator = VideoGenerator()
     scene_agent = SceneAgent()
     visual_asset_agent = VisualAssetAgent()
+    timeline_video_builder = TimelineVideoBuilder()
 
     try:
         logger.info("Phase 1: generating script")
@@ -190,28 +191,6 @@ def main() -> int:
     print(f"\nCaptions saved -> {srt_path}")
 
     try:
-        logger.info("Phase 4: generating video")
-        print("\nPhase 4 — Video generation")
-        video_path = video_generator.generate()
-    except AssetNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except BackgroundNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except VideoFFmpegNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except VideoGenerationError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except VideoGeneratorError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"\nVideo saved -> {video_path}")
-
-    try:
         logger.info("Phase 4.5A: generating visual scenes")
         print("\nPhase 4.5A — Scene Agent")
         _, scenes_path = scene_agent.generate()
@@ -255,6 +234,31 @@ def main() -> int:
         return 1
 
     print(f"\nVisual assets saved -> assets/scenes/")
+
+    try:
+        logger.info("Phase 4.5C: building timeline motion video")
+        print("\nPhase 4.5C — Timeline & Motion Video Builder")
+        result = timeline_video_builder.generate()
+    except ImagesNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except NarrationNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except TimelineCaptionsNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except TimelineFFmpegNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except TimelineRenderError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except TimelineVideoBuilderError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"\nVideo saved -> {result.output_path}")
     return 0
 
 
