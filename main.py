@@ -1,4 +1,4 @@
-"""CLI entry point for YouTube Shorts Phase 1–4.5: script through visual timeline video."""
+"""CLI entry point for YouTube Shorts Phase 1–5: script through thumbnail generation."""
 
 import logging
 import sys
@@ -50,6 +50,14 @@ from script_generator import (
     ScriptGeneratorError,
     ScriptValidationError,
 )
+from agents.thumbnail_agent import (
+    FFmpegNotFoundError as ThumbnailFFmpegNotFoundError,
+    ThumbnailAgent,
+    ThumbnailAgentError,
+    ThumbnailRenderError,
+    TitleNotFoundError,
+    VisualSourceNotFoundError,
+)
 from voice_generator import (
     PiperNotFoundError,
     ScriptNotFoundError,
@@ -86,6 +94,7 @@ def main() -> int:
     caption_generator = CaptionGenerator()
     scene_agent = SceneAgent()
     visual_timeline_agent = VisualTimelineAgent()
+    thumbnail_agent = ThumbnailAgent()
 
     try:
         logger.info("Phase 1: generating script")
@@ -244,6 +253,28 @@ def main() -> int:
         f"  ({result.video_scenes} video clips, {result.image_scenes} motion images)",
         flush=True,
     )
+
+    try:
+        logger.info("Phase 5: generating YouTube thumbnail")
+        print("\nPhase 5 — Thumbnail Agent")
+        thumb = thumbnail_agent.generate()
+    except TitleNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except VisualSourceNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except ThumbnailFFmpegNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except ThumbnailRenderError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except ThumbnailAgentError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"\nThumbnail saved -> {thumb.output_path}")
     return 0
 
 

@@ -9,13 +9,25 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from agents.subtitle_config import (
+    log_subtitle_settings,
+    segment_captions_for_shorts,
+    subtitle_max_words,
+    subtitle_min_words,
+    write_shorts_srt,
+)
+
+
+def subtitle_word_range_note() -> str:
+    return f"{subtitle_min_words()}-{subtitle_max_words()} words per block"
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_FFMPEG = "ffmpeg"
 WHISPER_MODEL_NAME = "base.en"
 AUDIO_PATH = Path("audio/output.wav")
 OUTPUT_SRT = Path("captions/output.srt")
-PROGRESS_STEPS = 5
+PROGRESS_STEPS = 6
 
 
 class CaptionGeneratorError(Exception):
@@ -106,8 +118,10 @@ class CaptionGenerator:
         self._print_progress(4, "Transcribing audio...")
         result = self._transcribe(model)
 
-        self._print_progress(5, "Writing output.srt...")
+        self._print_progress(5, "Segmenting and writing Shorts-style captions...")
         self._write_srt(result)
+
+        self._print_progress(6, "Verifying output.srt...")
         self._verify_output()
 
         logger.info("Captions saved to %s", self.output_path.resolve())
@@ -172,6 +186,7 @@ class CaptionGenerator:
                 audio_path,
                 language=self.language,
                 verbose=False,
+                word_timestamps=True,
             )
         except Exception as exc:
             logger.error("Whisper transcription failed: %s", exc)
@@ -181,28 +196,30 @@ class CaptionGenerator:
         return result
 
     def _write_srt(self, result: dict) -> None:
-        _whisper, get_writer = _import_whisper()
+        log_subtitle_settings()
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         if self.output_path.exists():
             self.output_path.unlink()
 
-        output_dir = str(self.output_path.parent.resolve())
-        audio_path = str(self.audio_path.resolve())
-        logger.info("Writing SRT to directory: %s", output_dir)
+        cues = segment_captions_for_shorts(result)
+        if not cues:
+            raise CaptionGenerationError(
+                "No caption cues produced from transcription. "
+                "Check audio quality and Whisper output."
+            )
 
         try:
-            writer = get_writer("srt", output_dir)
-            writer(result, audio_path)
-        except Exception as exc:
+            write_shorts_srt(cues, self.output_path)
+        except OSError as exc:
             logger.error("Failed to write SRT: %s", exc)
             raise CaptionGenerationError(f"Failed to write SRT file: {exc}") from exc
 
-        expected = self.output_path.resolve()
-        if not expected.is_file():
-            raise CaptionGenerationError(
-                f"Expected SRT file was not created: {expected}"
-            )
-        logger.info("SRT file written: %s", expected)
+        logger.info("SRT file written: %s (%d cues)", self.output_path, len(cues))
+        print(
+            f"  Shorts captions: {len(cues)} blocks "
+            f"({subtitle_word_range_note()})",
+            flush=True,
+        )
 
     def _verify_output(self) -> None:
         if not self.output_path.is_file():

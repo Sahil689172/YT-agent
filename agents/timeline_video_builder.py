@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents.subtitle_config import build_subtitle_force_style
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_FFMPEG = "ffmpeg"
@@ -38,19 +40,6 @@ MOTION_EFFECTS = (
     "pan_left",
     "pan_right",
     "ken_burns",
-)
-
-SUBTITLE_FORCE_STYLE = (
-    "FontName=Arial,"
-    "FontSize=20,"
-    "PrimaryColour=&H00FFFFFF,"
-    "OutlineColour=&H00000000,"
-    "BorderStyle=1,"
-    "Outline=2,"
-    "Shadow=0,"
-    "Alignment=2,"
-    "MarginV=45,"
-    "WrapStyle=0"
 )
 
 
@@ -461,7 +450,8 @@ class TimelineVideoBuilder:
             self.output_path.unlink()
 
         subtitles = escape_subtitles_path(self.captions_path)
-        video_filter = f"subtitles={subtitles}:force_style='{SUBTITLE_FORCE_STYLE}'"
+        force_style = build_subtitle_force_style()
+        video_filter = f"subtitles={subtitles}:force_style='{force_style}'"
 
         command = [
             self.ffmpeg,

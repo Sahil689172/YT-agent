@@ -18,10 +18,10 @@ from typing import Any, Literal
 
 import requests
 
+from agents.subtitle_config import build_subtitle_force_style
 from agents.timeline_video_builder import (
     FFMPEG_TIMEOUT_BUFFER,
     MOTION_EFFECTS,
-    SUBTITLE_FORCE_STYLE,
     VIDEO_FPS,
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
@@ -801,7 +801,8 @@ class VisualTimelineAgent:
             self.output_path.unlink()
 
         subtitles = escape_subtitles_path(self.captions_path)
-        video_filter = f"subtitles={subtitles}:force_style='{SUBTITLE_FORCE_STYLE}'"
+        force_style = build_subtitle_force_style()
+        video_filter = f"subtitles={subtitles}:force_style='{force_style}'"
         command = [
             self.ffmpeg,
             "-y",

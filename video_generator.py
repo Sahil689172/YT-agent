@@ -27,17 +27,7 @@ VIDEO_FPS = 30
 PLACEHOLDER_DURATION_SECONDS = 15
 FFMPEG_RENDER_TIMEOUT_BUFFER = 120
 
-SUBTITLE_FORCE_STYLE = (
-    "FontName=Arial,"
-    "FontSize=22,"
-    "PrimaryColour=&H00FFFFFF,"
-    "OutlineColour=&H00000000,"
-    "BorderStyle=1,"
-    "Outline=2,"
-    "Shadow=0,"
-    "Alignment=2,"
-    "MarginV=50"
-)
+from agents.subtitle_config import build_subtitle_force_style
 
 PROGRESS_STEPS = 6
 
@@ -313,7 +303,7 @@ class VideoGenerator:
             f"scale={self.width}:{self.height}:force_original_aspect_ratio=increase,"
             f"crop={self.width}:{self.height},"
             f"fps={self.fps},"
-            f"subtitles={subtitles_path}:force_style='{SUBTITLE_FORCE_STYLE}'"
+            f"subtitles={subtitles_path}:force_style='{build_subtitle_force_style()}'"
         )
 
     def _render_video(self) -> None:

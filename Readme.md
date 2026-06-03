@@ -1,106 +1,212 @@
 # YT-Agent
 
-**AI YouTube Agent** — A local-first pipeline that turns a topic into a finished YouTube Short, with a video-first visual timeline and a clear roadmap toward music, thumbnails, upload, and full automation.
+**AI-Powered Content Creation Platform** — Turn ideas or your own scripts into finished vertical videos with voice, captions, stock visuals, thumbnails, and publish-ready metadata. Local-first, automation-ready, and built for Shorts, Reels, and social video.
 
 ---
 
-## Project Vision
+## Product Vision
 
-Build a fully autonomous AI-powered YouTube Shorts agent that can:
+YT-Agent is no longer just a YouTube automation tool. It is a **content creation platform** with two ways to produce video:
 
-- Generate topics
-- Write scripts and metadata
-- Generate voiceovers and captions
-- Source stock video and images automatically
-- Assemble a single polished vertical video
-- Add background music, thumbnails, and YouTube upload
-- Run on a schedule with minimal human input
+1. **AI Mode** — Start from a topic; the system writes the script and runs the full pipeline.
+2. **Custom Script Mode** — Start from your script; the system handles production from voice through thumbnail and metadata.
 
-The system runs on local hardware wherever possible and uses free or self-hosted tools.
+Both modes share the same core engines: voice, captions, scene planning, visual asset selection, video assembly, and thumbnail generation. The platform runs on local hardware wherever possible (Ollama, Piper, Whisper, FFmpeg) and uses stock APIs for visuals.
 
 ---
 
-## Progress Tracker
+## Core Features
 
-### Completed
-
-| Phase | Name | Status |
-|-------|------|--------|
-| **1** | Script Generation | ✅ Complete |
-| **1** | Metadata Generation (title, description, hashtags) | ✅ Complete |
-| **2** | Voice Generation | ✅ Complete |
-| **3** | Caption Generation | ✅ Complete |
-| **4** | Video Generation (legacy background mode) | ✅ Complete |
-| **4.5A** | Scene Agent | ✅ Complete |
-| **4.5B** | Visual Timeline Agent (video-first pipeline) | ✅ Complete |
-
-The current default pipeline uses **Phase 4.5** (Scene Agent + Visual Timeline Agent). Phase 4 (`video_generator.py`) remains available as a legacy path that loops a manual background clip.
-
-### Upcoming
-
-| Phase | Name | Status |
-|-------|------|--------|
-| **5** | Background Music Agent | ⬜ Planned |
-| **6** | Thumbnail Agent | ⬜ Planned |
-| **7** | YouTube Upload Agent | ⬜ Planned |
-| **8** | Automation Agent | ⬜ Planned |
-
-### Future visual sources
-
-| Source | Status |
-|--------|--------|
-| Pexels Videos | ✅ Integrated (primary) |
-| Pexels Images | ✅ Integrated (fallback) |
-| Pixabay Images | ✅ Integrated (final fallback) |
-| AI Image / Video Generation | ⬜ Planned |
-
----
-
-## Current Pipeline
+### 1. AI Topic to Video
 
 ```text
 Topic
   ↓
-Script (+ metadata)
+Script
   ↓
 Voice
   ↓
 Captions
   ↓
-Scene Agent
+Scenes
   ↓
-Visual Timeline Agent
+Visual Assets
   ↓
-Final Video
+Video
+  ↓
+Thumbnail
+  ↓
+Metadata
 ```
 
-### Visual Timeline Agent (search order)
+**Today:** Fully supported via `python main.py "your topic"`. Metadata (title, description, hashtags) is generated in Phase 1 immediately after the script.
+
+---
+
+### 2. Custom Script to Video
 
 ```text
-1. Pexels Videos      ← primary (real stock clips)
-2. Pexels Images      ← fallback (motion effects applied)
+User Script
+  ↓
+Voice
+  ↓
+Captions
+  ↓
+Scenes
+  ↓
+Visual Assets
+  ↓
+Video
+  ↓
+Thumbnail
+  ↓
+Metadata
+```
+
+**Today:** Supported by placing your script in `scripts/script.txt`, then running pipeline phases from voice onward (see [Custom Script Mode](#custom-script-mode)). A dedicated CLI entry point for Custom Script Mode is on the roadmap.
+
+---
+
+## Progress Tracker
+
+### Completed features
+
+| Feature | Status |
+|---------|--------|
+| Script Generation | ✅ |
+| Metadata Generation | ✅ |
+| Voice Generation | ✅ |
+| Caption Generation | ✅ |
+| Scene Agent | ✅ |
+| Visual Timeline Agent | ✅ |
+| Final Video Generation | ✅ |
+| Thumbnail Generation | ✅ |
+
+### Core components (shipped)
+
+| Component | Module |
+|-----------|--------|
+| Script Generation | `script_generator.py` |
+| Metadata Generation | `metadata_generator.py` |
+| Voice Generation | `voice_generator.py` |
+| Caption Generation | `caption_generator.py` |
+| Scene Agent | `agents/scene_agent.py` |
+| Visual Timeline Agent | `agents/visual_timeline_agent.py` |
+| Final Video Generation | `agents/visual_timeline_agent.py` (+ legacy `video_generator.py`) |
+| Thumbnail Generation | `agents/thumbnail_agent.py` |
+
+### Upcoming
+
+| Phase | Name | Status |
+|-------|------|--------|
+| **6** | Background Music Agent | ⬜ Planned |
+| **7** | YouTube Upload Agent | ⬜ Planned |
+| **8** | Automation Agent | ⬜ Planned |
+| — | Custom Script CLI mode | ⬜ Planned |
+| — | AI image / video generation | ⬜ Planned |
+
+### Visual asset sources
+
+| Source | Status |
+|--------|--------|
+| Pexels Videos | ✅ Primary |
+| Pexels Images | ✅ Fallback |
+| Pixabay Images | ✅ Final fallback |
+| AI Generation | ⬜ Planned |
+
+---
+
+## Product Scope
+
+### AI Mode
+
+```text
+Topic
+  ↓
+Script Generation
+  ↓
+Voice Generation
+  ↓
+Caption Generation
+  ↓
+Scene Planning
+  ↓
+Visual Asset Selection
+  ↓
+Video Generation
+  ↓
+Thumbnail Generation
+  ↓
+Metadata Generation
+```
+
+**CLI:** `python main.py "your topic"`
+
+---
+
+### Custom Script Mode
+
+```text
+User Script
+  ↓
+Voice Generation
+  ↓
+Caption Generation
+  ↓
+Scene Planning
+  ↓
+Visual Asset Selection
+  ↓
+Video Generation
+  ↓
+Thumbnail Generation
+  ↓
+Metadata Generation
+```
+
+#### Custom Script Mode
+
+1. Write your narration into `scripts/script.txt` (plain text, no scene directions).
+2. Run phases individually:
+
+```python
+from metadata_generator import MetadataGenerator
+from voice_generator import VoiceGenerator
+from caption_generator import CaptionGenerator
+from agents.scene_agent import SceneAgent
+from agents.visual_timeline_agent import VisualTimelineAgent
+from agents.thumbnail_agent import ThumbnailAgent
+
+script = open("scripts/script.txt", encoding="utf-8").read()
+topic = "your video topic or niche label"
+
+VoiceGenerator().generate()
+CaptionGenerator().generate()
+SceneAgent().generate()
+VisualTimelineAgent().generate()
+ThumbnailAgent().generate()
+MetadataGenerator().generate_and_save(script, topic)
+```
+
+---
+
+## Visual pipeline
+
+The **Visual Timeline Agent** uses a video-first timeline:
+
+```text
+1. Pexels Videos      ← primary
+2. Pexels Images      ← fallback (Ken Burns / zoom / pan)
 3. Pixabay Images     ← final fallback
-4. AI Generation      ← future roadmap
         ↓
 Timeline Builder (FFmpeg)
         ↓
 videos/output.mp4
 ```
 
-- Reads `scenes/scenes.json` (per-scene duration, title, visual description)
-- Normalizes segment lengths to narration duration
-- Trims stock video or applies Ken Burns / zoom / pan on images
-- Muxes `audio/output.wav` and burns in `captions/output.srt`
-- Produces **one** final file — no per-scene `scene_1.mp4` exports in `videos/`
-
-### Run the full pipeline
-
-```bash
-pip install -r requirements.txt
-python main.py "your topic here"
-```
-
-**Environment:** create a `.env` file with at least `PEXELS_API_KEY` (recommended). Optional: `PIXABAY_API_KEY` for image fallback when Pexels has no match.
+- Input: `scenes/scenes.json` (durations, titles, visual descriptions)
+- Output: **1080×1920** vertical Short with narration and burned-in captions
+- One final MP4 — no per-scene exports in `videos/`
 
 ---
 
@@ -113,28 +219,27 @@ python main.py "your topic here"
 | **Voice** | Piper TTS |
 | **Captions** | OpenAI Whisper (local, `base.en`) |
 | **Visual assets** | Pexels API (photos + videos), Pixabay API |
-| **Video processing** | FFmpeg, ffprobe |
-| **Image handling** | Pillow |
-| **Future thumbnails** | Pillow (planned) |
+| **Video** | FFmpeg, ffprobe |
+| **Thumbnails** | Pillow |
 | **Future upload** | YouTube Data API v3 (planned) |
 
 ---
 
-## Current Output
+## Outputs
 
 | Path | Description |
 |------|-------------|
-| `scripts/script.txt` | Formatted narration script |
-| `scripts/output.txt` | Raw script (debug) |
-| `scripts/title.txt` | YouTube title |
+| `scripts/script.txt` | Narration script |
+| `scripts/title.txt` | Video title |
 | `scripts/description.txt` | Video description |
 | `scripts/hashtags.txt` | Hashtags (one per line) |
 | `audio/output.wav` | Narration audio |
-| `captions/output.srt` | Burned-in-ready subtitles |
-| `scenes/scenes.json` | Scene list from Scene Agent |
-| `assets/timeline/` | Cached stock clips/images per scene |
-| `assets/cache/` | 24h API search cache |
-| `videos/output.mp4` | Final vertical Short (1080×1920, 30 fps) |
+| `captions/output.srt` | Shorts-style subtitles |
+| `scenes/scenes.json` | Scene plan |
+| `assets/timeline/` | Cached stock clips / images |
+| `assets/cache/` | API search cache (24h) |
+| `videos/output.mp4` | Final video (1080×1920) |
+| `thumbnails/output.png` | Thumbnail (1280×720) |
 
 ---
 
@@ -143,188 +248,37 @@ python main.py "your topic here"
 ```text
 YT-agent/
 ├── agents/
-│   ├── scene_agent.py              # Phase 4.5A — script → scenes.json
-│   ├── visual_timeline_agent.py    # Phase 4.5B — video-first timeline + final MP4
-│   ├── visual_asset_agent.py       # Legacy — image download only (fallback tooling)
-│   └── timeline_video_builder.py   # Legacy — image slideshow + motion (fallback tooling)
+│   ├── scene_agent.py
+│   ├── visual_timeline_agent.py
+│   ├── thumbnail_agent.py
+│   ├── subtitle_config.py
+│   ├── visual_asset_agent.py       # legacy image-only path
+│   └── timeline_video_builder.py   # legacy slideshow path
 ├── assets/
-│   ├── backgrounds/                # Legacy Phase 4 background clip
-│   ├── cache/                      # Pexels / Pixabay / video search cache
-│   ├── scenes/                     # Legacy downloaded stills (image-only path)
-│   └── timeline/                   # Cached scene_N.mp4 / scene_N.jpg + manifest.json
+│   ├── backgrounds/
+│   ├── cache/
+│   ├── clips/
+│   ├── scenes/
+│   └── timeline/
 ├── audio/
-│   └── output.wav
 ├── captions/
-│   └── output.srt
 ├── scenes/
-│   └── scenes.json
 ├── scripts/
-│   ├── script.txt
-│   ├── output.txt
-│   ├── title.txt
-│   ├── description.txt
-│   └── hashtags.txt
+├── thumbnails/
 ├── videos/
-│   └── output.mp4
-├── models/
-│   └── piper/                      # Piper voice model
-├── main.py                         # CLI — Phases 1 → 4.5B
-├── script_generator.py             # Phase 1 — script
-├── metadata_generator.py           # Phase 1 — metadata
-├── voice_generator.py              # Phase 2 — voice
-├── caption_generator.py            # Phase 3 — captions
-├── video_generator.py              # Phase 4 — legacy background video
-├── requirements.txt
+├── models/piper/
+├── main.py                         # AI Mode — full pipeline
+├── script_generator.py
+├── metadata_generator.py
+├── voice_generator.py
+├── caption_generator.py
+├── video_generator.py              # legacy background video
 └── Readme.md
 ```
 
 ---
 
-## Completed Phases
-
-### Phase 1 — Script Generation ✅
-
-- Accepts a topic from the CLI or an interactive prompt
-- Generates a YouTube Shorts script with Ollama (Llama 3)
-- Target length: 140–180 words (validated: 120–200, with auto-retry)
-- Produces title, description, and 10 hashtags from the script
-- Enforces style rules (no narrator labels, scene directions, or host references)
-
-**Modules:** `script_generator.py`, `metadata_generator.py`
-
----
-
-### Phase 2 — Voice Generation ✅
-
-- Reads `scripts/script.txt`
-- Synthesizes narration with Piper TTS (`en_US-ryan-high`)
-- Writes `audio/output.wav`
-
-**Module:** `voice_generator.py`
-
----
-
-### Phase 3 — Caption Generation ✅
-
-- Transcribes `audio/output.wav` with local OpenAI Whisper (`base.en`)
-- Writes `captions/output.srt`
-
-**Module:** `caption_generator.py`
-
----
-
-### Phase 4 — Basic Video Generation ✅ (legacy)
-
-- Combines a looping background clip, narration, and burned-in subtitles
-- Vertical output: **1080×1920**, **30 fps**, **H.264** + **AAC**
-- **Not used by default** in `main.py`; superseded by Phase 4.5 for automated visuals
-
-**Module:** `video_generator.py`
-
----
-
-### Phase 4.5A — Scene Agent ✅
-
-- Reads `scripts/script.txt`
-- Uses narration duration (ffprobe on `audio/output.wav`) to size the timeline
-- Splits the script into 6–15 scenes with `duration_seconds`, `title`, and `visual_description`
-- Writes `scenes/scenes.json`
-
-**Module:** `agents/scene_agent.py`
-
----
-
-### Phase 4.5B — Visual Timeline Agent ✅
-
-- Video-first stock search: **Pexels Videos → Pexels Images → Pixabay Images**
-- Downloads assets on demand with search and file caching
-- Builds one FFmpeg timeline (trim video clips or motion on stills)
-- Adds narration and burned-in captions
-- Exports `videos/output.mp4`
-
-**Progress steps:** Reading scenes → Pexels Videos → Images → Building timeline → Motion/trim → Narration → Captions → Completed
-
-**Module:** `agents/visual_timeline_agent.py`
-
-**Legacy modules** (still in repo for image-only workflows): `visual_asset_agent.py`, `timeline_video_builder.py`
-
----
-
-## Future Roadmap
-
-### Phase 5 — Background Music Agent ⬜
-
-**Goal:**
-
-```text
-Video + Narration + Category-Based Background Music
-```
-
-**Example categories:** Finance, Business, Technology, History, General
-
----
-
-### Phase 6 — Thumbnail Agent ⬜
-
-**Goal:** Generate an eye-catching thumbnail from topic and script.
-
-**Output:** `thumbnails/output.png`
-
----
-
-### Phase 7 — YouTube Upload Agent ⬜
-
-**Goal:** Publish the Short without manual steps.
-
-**Uploads:** video, thumbnail, title, description, hashtags
-
-**API:** YouTube Data API v3
-
----
-
-### Phase 8 — Automation Agent ⬜
-
-**Goal:** Run the entire pipeline automatically on a schedule.
-
-**Includes:** logging, error handling, retries, and hands-off topic → published Short flow
-
----
-
-## Long-Term Vision
-
-```text
-Topic
-  ↓
-Script
-  ↓
-Voice
-  ↓
-Captions
-  ↓
-Scene Agent
-  ↓
-Visual Timeline Agent
-  ↓
-Music Agent
-  ↓
-Thumbnail Agent
-  ↓
-Upload Agent
-  ↓
-Automation Agent
-```
-
----
-
-## Requirements
-
-### Hardware (reference setup)
-
-- 16 GB RAM recommended
-- Python 3.13
-- Ollama with Llama 3
-- FFmpeg and ffprobe on PATH
-- Piper TTS (`piper.exe` + voice model under `models/piper/`)
+## Quick Start
 
 ### Install
 
@@ -332,53 +286,57 @@ Automation Agent
 pip install -r requirements.txt
 ```
 
-### API keys (`.env`)
+### Environment (`.env`)
 
 ```env
 PEXELS_API_KEY=your_key
 PIXABAY_API_KEY=your_key
 ```
 
-### Optional: run a single phase
+Optional subtitle tuning:
 
-```python
-from script_generator import ScriptGenerator
-from metadata_generator import MetadataGenerator
-from voice_generator import VoiceGenerator
-from caption_generator import CaptionGenerator
-from agents.scene_agent import SceneAgent
-from agents.visual_timeline_agent import VisualTimelineAgent
-
-# After prior outputs exist:
-# ScriptGenerator().generate_and_save("your topic")
-# MetadataGenerator().generate_and_save(script, topic)
-# VoiceGenerator().generate()
-# CaptionGenerator().generate()
-# SceneAgent().generate()
-# VisualTimelineAgent().generate()
+```env
+SUBTITLE_FONT_SIZE=13
+SUBTITLE_MAX_LINES=2
+SUBTITLE_BOTTOM_MARGIN=110
+SUBTITLE_FONT_NAME=Poppins SemiBold
 ```
 
-Legacy image-only path:
+### AI Mode (recommended)
 
-```python
-from agents.visual_asset_agent import VisualAssetAgent
-from agents.timeline_video_builder import TimelineVideoBuilder
-
-# VisualAssetAgent().generate()
-# TimelineVideoBuilder().generate()
+```bash
+python main.py "Mastering capital expenditure for startups"
 ```
+
+### Requirements
+
+- Python 3.13
+- Ollama with Llama 3 (`ollama pull llama3`)
+- FFmpeg and ffprobe on PATH
+- Piper TTS + voice model under `models/piper/`
 
 ---
 
-## Success Criteria
+## Long-Term Vision
 
-The project is complete when:
+```text
+Topic or User Script
+  ↓
+Production pipeline (voice → video → thumbnail)
+  ↓
+Music Agent
+  ↓
+Upload Agent
+  ↓
+Automation Agent (scheduled runs)
+```
 
-- A topic can drive the full pipeline without manual asset gathering
-- Script, voice, captions, video, music, thumbnail, and upload run automatically
-- The workflow can run on a schedule with minimal human input
+**Platform goals:**
 
-**Today:** Phases 1–3 and 4.5 deliver a watchable, stock-video-first Short from a single topic via `python main.py`.
+- One command from topic or script to publish-ready assets
+- Category-based background music
+- Automatic YouTube upload (video + thumbnail + metadata)
+- Fully scheduled, hands-off content creation
 
 ---
 
