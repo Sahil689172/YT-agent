@@ -1,4 +1,4 @@
-"""CLI entry point for YouTube Shorts Phase 1–4.5C: script through timeline video."""
+"""CLI entry point for YouTube Shorts Phase 1–4.5: script through visual timeline video."""
 
 import logging
 import sys
@@ -12,12 +12,16 @@ from agents.scene_agent import (
     SceneValidationError,
     ScriptNotFoundError as SceneScriptNotFoundError,
 )
-from agents.visual_asset_agent import (
-    APIKeyMissingError,
-    AssetDownloadError,
-    ScenesNotFoundError,
-    VisualAssetAgent,
-    VisualAssetAgentError,
+from agents.visual_asset_agent import APIKeyMissingError
+from agents.visual_timeline_agent import (
+    CaptionsNotFoundError as TimelineCaptionsNotFoundError,
+    FFmpegNotFoundError as TimelineFFmpegNotFoundError,
+    NarrationNotFoundError,
+    ScenesNotFoundError as TimelineScenesNotFoundError,
+    TimelineAssetError,
+    TimelineRenderError,
+    VisualTimelineAgent,
+    VisualTimelineAgentError,
 )
 from caption_generator import (
     AudioNotFoundError,
@@ -45,15 +49,6 @@ from script_generator import (
     ScriptGenerator,
     ScriptGeneratorError,
     ScriptValidationError,
-)
-from agents.timeline_video_builder import (
-    CaptionsNotFoundError as TimelineCaptionsNotFoundError,
-    FFmpegNotFoundError as TimelineFFmpegNotFoundError,
-    ImagesNotFoundError,
-    NarrationNotFoundError,
-    TimelineRenderError,
-    TimelineVideoBuilder,
-    TimelineVideoBuilderError,
 )
 from voice_generator import (
     PiperNotFoundError,
@@ -90,8 +85,7 @@ def main() -> int:
     voice_generator = VoiceGenerator()
     caption_generator = CaptionGenerator()
     scene_agent = SceneAgent()
-    visual_asset_agent = VisualAssetAgent()
-    timeline_video_builder = TimelineVideoBuilder()
+    visual_timeline_agent = VisualTimelineAgent()
 
     try:
         logger.info("Phase 1: generating script")
@@ -217,29 +211,13 @@ def main() -> int:
     print(f"\nScenes saved -> {scenes_path}")
 
     try:
-        logger.info("Phase 4.5B: downloading visual assets")
-        print("\nPhase 4.5B — Visual Asset Agent")
-        visual_asset_agent.generate()
-    except ScenesNotFoundError as exc:
+        logger.info("Phase 4.5B: building video-first visual timeline")
+        print("\nPhase 4.5B — Visual Timeline Agent")
+        result = visual_timeline_agent.generate()
+    except TimelineScenesNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     except APIKeyMissingError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except AssetDownloadError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except VisualAssetAgentError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"\nVisual assets saved -> assets/scenes/")
-
-    try:
-        logger.info("Phase 4.5C: building timeline motion video")
-        print("\nPhase 4.5C — Timeline & Motion Video Builder")
-        result = timeline_video_builder.generate()
-    except ImagesNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     except NarrationNotFoundError as exc:
@@ -251,14 +229,21 @@ def main() -> int:
     except TimelineFFmpegNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    except TimelineAssetError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     except TimelineRenderError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    except TimelineVideoBuilderError as exc:
+    except VisualTimelineAgentError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     print(f"\nVideo saved -> {result.output_path}")
+    print(
+        f"  ({result.video_scenes} video clips, {result.image_scenes} motion images)",
+        flush=True,
+    )
     return 0
 
 

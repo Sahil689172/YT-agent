@@ -1,7 +1,8 @@
-"""Phase 4.5C: Build final Short from scene images with motion, narration, and subtitles."""
+"""Phase 4.5C (legacy): Build final Short from scene images with motion, narration, and subtitles."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_FFMPEG = "ffmpeg"
 DEFAULT_FFPROBE = "ffprobe"
 SCENES_DIR = Path("assets/scenes")
+SCENES_JSON_PATH = Path("scenes/scenes.json")
 AUDIO_PATH = Path("audio/output.wav")
 CAPTIONS_PATH = Path("captions/output.srt")
 OUTPUT_PATH = Path("videos/output.mp4")
@@ -287,36 +289,95 @@ class TimelineVideoBuilder:
         print(f"  Narration length: {duration:.1f}s", flush=True)
         return duration
 
+    def _load_scene_durations(self) -> dict[int, float]:
+        """Load per-scene durations from scenes.json when available."""
+        if not SCENES_JSON_PATH.is_file():
+            return {}
+        try:
+            data = json.loads(SCENES_JSON_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if isinstance(data, dict) and "scenes" in data:
+            data = data["scenes"]
+        if not isinstance(data, list):
+            return {}
+        durations: dict[int, float] = {}
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            try:
+                number = int(item["scene_number"])
+                durations[number] = max(
+                    MIN_SEGMENT_SECONDS,
+                    float(item.get("duration_seconds") or MIN_SEGMENT_SECONDS),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+        return durations
+
     def _build_timeline(self) -> list[TimelineEntry]:
         count = len(self._images)
-        per_image = self._narration_seconds / count
-        if per_image < MIN_SEGMENT_SECONDS:
-            logger.warning(
-                "Per-image duration %.2fs is short; narration may feel fast",
-                per_image,
-            )
+        scene_durations = self._load_scene_durations()
+        use_scene_durations = bool(scene_durations)
 
-        timeline: list[TimelineEntry] = []
+        raw: list[tuple[int, Path, float, str]] = []
         for image_path in self._images:
             match = re.search(r"scene_(\d+)", image_path.name, re.I)
-            scene_number = int(match.group(1)) if match else len(timeline) + 1
-            effect = random.choice(MOTION_EFFECTS)
-            entry = TimelineEntry(
-                scene_number=scene_number,
-                image_path=image_path,
-                duration_seconds=per_image,
-                motion_effect=effect,
+            scene_number = int(match.group(1)) if match else len(raw) + 1
+            if use_scene_durations and scene_number in scene_durations:
+                duration = scene_durations[scene_number]
+            else:
+                duration = self._narration_seconds / count
+            raw.append((scene_number, image_path, duration, random.choice(MOTION_EFFECTS)))
+
+        if use_scene_durations:
+            total = sum(item[2] for item in raw)
+            if total > 0 and abs(total - self._narration_seconds) > 0.05:
+                ratio = self._narration_seconds / total
+                normalized: list[tuple[int, Path, float, str]] = []
+                for scene_number, image_path, duration, effect in raw:
+                    normalized.append(
+                        (
+                            scene_number,
+                            image_path,
+                            max(MIN_SEGMENT_SECONDS, duration * ratio),
+                            effect,
+                        )
+                    )
+                drift = self._narration_seconds - sum(item[2] for item in normalized)
+                if normalized and abs(drift) > 0.05:
+                    last = normalized[-1]
+                    normalized[-1] = (
+                        last[0],
+                        last[1],
+                        max(MIN_SEGMENT_SECONDS, last[2] + drift),
+                        last[3],
+                    )
+                raw = normalized
+            per_note = "scenes.json durations (normalized)"
+        else:
+            per_note = f"equal split ({self._narration_seconds / count:.1f}s each)"
+
+        timeline: list[TimelineEntry] = []
+        for scene_number, image_path, duration, effect in raw:
+            timeline.append(
+                TimelineEntry(
+                    scene_number=scene_number,
+                    image_path=image_path,
+                    duration_seconds=duration,
+                    motion_effect=effect,
+                )
             )
-            timeline.append(entry)
             logger.info(
                 "Timeline scene %d: %.2fs, motion=%s, file=%s",
                 scene_number,
-                per_image,
+                duration,
                 effect,
                 image_path.name,
             )
+
         print(
-            f"  {count} images × {per_image:.1f}s ≈ {self._narration_seconds:.1f}s total",
+            f"  {count} images, {per_note} ≈ {self._narration_seconds:.1f}s total",
             flush=True,
         )
         return timeline
