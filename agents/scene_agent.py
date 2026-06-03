@@ -23,12 +23,13 @@ SCENES_DIR = Path("scenes")
 AGENTS_DIR = Path("agents")
 OUTPUT_PATH = SCENES_DIR / "scenes.json"
 
-MIN_SCENES = 4
-MAX_SCENES = 8
+SECONDS_PER_VISUAL = 5
+ABSOLUTE_MIN_SCENES = 6
+ABSOLUTE_MAX_SCENES = 15
 MIN_SCENE_DURATION = 3
-MAX_SCENE_DURATION = 30
+MAX_SCENE_DURATION = 8
 DURATION_TOLERANCE_RATIO = 0.15
-WORDS_PER_SECOND_ESTIMATE = 2.2
+WORDS_PER_SECOND_ESTIMATE = 2.5
 PROGRESS_STEPS = 5
 MAX_GENERATION_ATTEMPTS = 3
 SCENE_OBJECT_KEYS = ("scene_number", "duration_seconds", "title", "visual_description")
@@ -63,7 +64,9 @@ Each scene object must have exactly these keys:
 - visual_description (detailed image prompt for AI; 1-2 sentences)
 
 Rules:
-- The "scenes" array must contain between 4 and 8 items
+- Create one visual segment approximately every 5 seconds of narration
+- The "scenes" array length must be within the requested range
+- Each segment should be about 4-6 seconds (duration_seconds)
 - Sum of duration_seconds must be close to the target total duration provided
 - No markdown, no code fences, no text outside the JSON object"""
 
@@ -71,7 +74,9 @@ USER_PROMPT_TEMPLATE = """Script:
 {script}
 
 Target total narration duration: {target_duration:.0f} seconds
-Create exactly {min_scenes} to {max_scenes} scenes (minimum {min_scenes} required).
+Target visual count: {target_visuals} (one visual every ~{seconds_per_visual} seconds)
+Create exactly {min_scenes} to {max_scenes} visual segments (required minimum: {min_scenes}).
+Each segment covers a distinct moment in the script.
 The sum of all duration_seconds must be approximately {target_duration:.0f} seconds.
 
 Return JSON: {{"scenes": [ ... at least {min_scenes} scene objects ... ]}}"""
@@ -158,7 +163,15 @@ def probe_audio_duration(audio_path: Path) -> float | None:
 def estimate_duration_from_script(script: str) -> float:
     """Estimate narration length from word count when audio is unavailable."""
     word_count = len(script.split())
-    return max(30.0, word_count / WORDS_PER_SECOND_ESTIMATE)
+    return max(30.0, min(45.0, word_count / WORDS_PER_SECOND_ESTIMATE))
+
+
+def calculate_visual_segment_counts(duration_seconds: float) -> tuple[int, int, int]:
+    """Return (target_visuals, min_scenes, max_scenes) — ~1 visual every 5 seconds."""
+    target = max(ABSOLUTE_MIN_SCENES, round(duration_seconds / SECONDS_PER_VISUAL))
+    min_scenes = max(ABSOLUTE_MIN_SCENES, target - 1)
+    max_scenes = min(ABSOLUTE_MAX_SCENES, target + 1)
+    return target, min_scenes, max_scenes
 
 
 def _repair_json(text: str) -> str:
@@ -197,8 +210,8 @@ def _coerce_to_scene_list(data: Any) -> list[dict[str, Any]]:
 
 def enforce_scene_count(
     scenes: list[dict[str, Any]],
-    min_scenes: int = MIN_SCENES,
-    max_scenes: int = MAX_SCENES,
+    min_scenes: int = ABSOLUTE_MIN_SCENES,
+    max_scenes: int = ABSOLUTE_MAX_SCENES,
 ) -> list[dict[str, Any]]:
     """Require a valid scene count before accepting model output."""
     count = len(scenes)
@@ -314,15 +327,14 @@ class SceneAgent:
         script_path: Path | str = SCRIPT_PATH,
         audio_path: Path | str = AUDIO_PATH,
         output_path: Path | str = OUTPUT_PATH,
-        min_scenes: int = MIN_SCENES,
-        max_scenes: int = MAX_SCENES,
     ) -> None:
         self.model = model
         self.script_path = Path(script_path)
         self.audio_path = Path(audio_path)
         self.output_path = Path(output_path)
-        self.min_scenes = min_scenes
-        self.max_scenes = max_scenes
+        self.min_scenes = ABSOLUTE_MIN_SCENES
+        self.max_scenes = ABSOLUTE_MAX_SCENES
+        self.target_visual_count = ABSOLUTE_MIN_SCENES
         self._script_text = ""
         self._target_duration = 0.0
 
@@ -381,13 +393,37 @@ class SceneAgent:
         else:
             self._target_duration = estimate_duration_from_script(self._script_text)
             source = "script word-count estimate"
-        logger.info("Target narration duration: %.1f seconds (%s)", self._target_duration, source)
+        target, min_scenes, max_scenes = calculate_visual_segment_counts(
+            self._target_duration
+        )
+        self.target_visual_count = target
+        self.min_scenes = min_scenes
+        self.max_scenes = max_scenes
+        logger.info(
+            "Target narration duration: %.1f seconds (%s)",
+            self._target_duration,
+            source,
+        )
+        logger.info(
+            "Target visuals: %d (range %d-%d, ~1 every %ds)",
+            target,
+            min_scenes,
+            max_scenes,
+            SECONDS_PER_VISUAL,
+        )
         print(f"  Target duration: {self._target_duration:.1f}s ({source})", flush=True)
+        print(
+            f"  Target visuals: {target} (scenes {min_scenes}-{max_scenes}, "
+            f"~1 every {SECONDS_PER_VISUAL}s)",
+            flush=True,
+        )
 
     def _generate_scenes(self) -> list[dict[str, Any]]:
         prompt = USER_PROMPT_TEMPLATE.format(
             script=self._script_text,
             target_duration=self._target_duration,
+            target_visuals=self.target_visual_count,
+            seconds_per_visual=SECONDS_PER_VISUAL,
             min_scenes=self.min_scenes,
             max_scenes=self.max_scenes,
         )

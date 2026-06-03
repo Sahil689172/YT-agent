@@ -1,4 +1,4 @@
-"""CLI entry point for YouTube Shorts Phase 1–4.5A: script through scene agent."""
+"""CLI entry point for YouTube Shorts Phase 1–4.5B: script through visual assets."""
 
 import logging
 import sys
@@ -11,6 +11,13 @@ from agents.scene_agent import (
     SceneOllamaModelError,
     SceneValidationError,
     ScriptNotFoundError as SceneScriptNotFoundError,
+)
+from agents.visual_asset_agent import (
+    APIKeyMissingError,
+    AssetDownloadError,
+    ScenesNotFoundError,
+    VisualAssetAgent,
+    VisualAssetAgentError,
 )
 from caption_generator import (
     AudioNotFoundError,
@@ -83,6 +90,7 @@ def main() -> int:
     caption_generator = CaptionGenerator()
     video_generator = VideoGenerator()
     scene_agent = SceneAgent()
+    visual_asset_agent = VisualAssetAgent()
 
     try:
         logger.info("Phase 1: generating script")
@@ -101,10 +109,8 @@ def main() -> int:
         return 1
 
     word_count = len(script.split())
-    if TARGET_MIN_WORDS <= word_count <= TARGET_MAX_WORDS:
-        range_note = f"target {TARGET_MIN_WORDS}-{TARGET_MAX_WORDS}"
-    elif MIN_WORDS <= word_count <= MAX_WORDS:
-        range_note = f"valid {MIN_WORDS}-{MAX_WORDS}"
+    if MIN_WORDS <= word_count <= MAX_WORDS:
+        range_note = f"{MIN_WORDS}-{MAX_WORDS} words (30-45s target)"
     else:
         range_note = f"outside {MIN_WORDS}-{MAX_WORDS}"
     print(f"Script saved — final word count: {word_count} ({range_note})")
@@ -230,6 +236,25 @@ def main() -> int:
         return 1
 
     print(f"\nScenes saved -> {scenes_path}")
+
+    try:
+        logger.info("Phase 4.5B: downloading visual assets")
+        print("\nPhase 4.5B — Visual Asset Agent")
+        visual_asset_agent.generate()
+    except ScenesNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except APIKeyMissingError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except AssetDownloadError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except VisualAssetAgentError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"\nVisual assets saved -> assets/scenes/")
     return 0
 
 

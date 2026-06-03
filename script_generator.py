@@ -12,29 +12,64 @@ import ollama
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "llama3"
-TARGET_MIN_WORDS = 140
-TARGET_MAX_WORDS = 180
-MIN_WORDS = 120
-MAX_WORDS = 200
+TARGET_MIN_WORDS = 80
+TARGET_MAX_WORDS = 100
+MIN_WORDS = 80
+MAX_WORDS = 100
 MAX_REGENERATIONS = 3
 MAX_GENERATION_ATTEMPTS = 1 + MAX_REGENERATIONS
 DEFAULT_OUTPUT = Path("scripts/output.txt")
 DEFAULT_FORMATTED = Path("scripts/script.txt")
 WRAP_WIDTH = 90
 
+# Lines to strip entirely (case-insensitive, matched at line start).
+INTRO_LINE_PATTERNS = [
+    r"^here\s+is\s+(?:your\s+)?(?:a\s+)?youtube\s+shorts?\s+script",
+    r"^here'?s\s+(?:your\s+)?(?:a\s+)?youtube\s+shorts?\s+script",
+    r"^here\s+is\s+(?:your\s+)?(?:a\s+)?script\b",
+    r"^here'?s\s+(?:your\s+)?(?:a\s+)?script\b",
+    r"^here'?s\s+a\s+script\s+for\b",
+    r"^script\s*:",
+    r"^title\s*:",
+    r"^introduction\s*:",
+]
+
+# Phrases that must not appear anywhere in the final narration.
+FORBIDDEN_PHRASE_PATTERNS = [
+    (r"\bhere\s+is\s+(?:your\s+)?(?:a\s+)?script\b", "intro phrase 'here is ... script'"),
+    (r"\bhere'?s\s+(?:your\s+)?(?:a\s+)?script\b", "intro phrase \"here's ... script\""),
+    (r"\bhere'?s\s+a\s+script\s+for\s+(?:your\s+)?video\b", "intro phrase \"here's a script for your video\""),
+    (r"\bhere\s+is\s+(?:a\s+)?youtube\s+shorts?\s+script\b", "intro phrase 'here is ... youtube shorts script'"),
+    (r"\bhere'?s\s+(?:a\s+)?youtube\s+shorts?\s+script\b", "intro phrase \"here's ... youtube shorts script\""),
+    (r"\bhere'?s\s+a\s+script\s+for\s+your\b", "intro phrase \"here's a script for your\""),
+    (r"\bnarrator\s*:", "narrator labels"),
+    (r"\bvoiceover\s*:", "narrator labels"),
+    (r"\[.*?\]", "scene directions in brackets"),
+    (r"\bI(?:'m| am) your host\b", "host references"),
+    (r"\bwelcome back to (?:the |my )?channel\b", "host references"),
+]
+
 SYSTEM_PROMPT = f"""You write spoken-word scripts for YouTube Shorts.
-Output ONLY the script text the speaker says aloud.
+Output ONLY the script text the speaker says aloud — nothing else.
+
 Rules:
-- {TARGET_MIN_WORDS} to {TARGET_MAX_WORDS} words total (about 50-60 seconds when spoken aloud)
+- Exactly {TARGET_MIN_WORDS} to {TARGET_MAX_WORDS} words (30-45 seconds when spoken aloud)
+- Start immediately with the hook — the first spoken sentence must be about the topic
+- NEVER include meta text such as:
+  - "Here is your script"
+  - "Here's a script"
+  - "Here is a YouTube Shorts script"
+  - "Script:" or "Title:" or "Introduction:"
 - No narrator labels (e.g. Narrator:, Voiceover:)
 - No scene directions or stage directions in brackets or parentheses
 - No host references (e.g. "I'm your host", "welcome back to the channel")
 - No titles, headings, bullet points, or metadata
-- Conversational, punchy, hook in the first line, strong close"""
+- Conversational, punchy, strong close"""
 
 USER_PROMPT_TEMPLATE = f"""Write a YouTube Shorts script about: {{topic}}
 
-Remember: plain spoken script only, {TARGET_MIN_WORDS}-{TARGET_MAX_WORDS} words (50-60 seconds of narration)."""
+Plain spoken narration only. {TARGET_MIN_WORDS}-{TARGET_MAX_WORDS} words (30-45 seconds).
+Do NOT include any introduction about writing a script — jump straight into the topic."""
 
 
 class ScriptGeneratorError(Exception):
@@ -229,11 +264,14 @@ class ScriptGenerator:
         return len(text.split())
 
     def _clean_script(self, text: str) -> str:
-        """Strip labels, directions, and other non-spoken artifacts."""
+        """Strip labels, directions, intro lines, and other non-spoken artifacts."""
         lines = []
         for line in text.splitlines():
             line = line.strip()
             if not line:
+                continue
+            if self._is_intro_line(line):
+                logger.info("Removed intro line: %s", line[:80])
                 continue
             line = re.sub(r"^(narrator|voiceover|host|speaker)\s*:\s*", "", line, flags=re.I)
             line = re.sub(r"^\[.*?\]\s*", "", line)
@@ -241,17 +279,35 @@ class ScriptGenerator:
             line = re.sub(r"^#+\s*", "", line)
             if line:
                 lines.append(line)
-        return " ".join(lines)
+
+        combined = " ".join(lines)
+        combined = self._strip_intro_prefix(combined)
+        return combined.strip()
+
+    @staticmethod
+    def _is_intro_line(line: str) -> bool:
+        for pattern in INTRO_LINE_PATTERNS:
+            if re.match(pattern, line, re.I):
+                return True
+        return False
+
+    @staticmethod
+    def _strip_intro_prefix(text: str) -> str:
+        """Remove leading meta phrases sometimes prepended to the first sentence."""
+        patterns = [
+            r"^(?:here(?:'s|\s+is)\s+(?:your\s+)?(?:a\s+)?(?:youtube\s+shorts?\s+)?script(?:\s+about)?[:\s-]*)+",
+            r"^(?:here(?:'s|\s+is)\s+(?:a\s+)?script(?:\s+for)?(?:\s+your)?(?:\s+video)?[:\s-]*)+",
+            r"^(?:script|title|introduction)\s*:\s*",
+        ]
+        cleaned = text.strip()
+        for pattern in patterns:
+            updated = re.sub(pattern, "", cleaned, flags=re.I).strip()
+            if updated != cleaned:
+                cleaned = updated
+        return cleaned
 
     def _validate_forbidden_content(self, script: str) -> None:
-        """Reject scripts that contain labels, directions, or host references."""
-        forbidden = [
-            (r"\bnarrator\s*:", "narrator labels"),
-            (r"\bvoiceover\s*:", "narrator labels"),
-            (r"\[.*?\]", "scene directions in brackets"),
-            (r"\bI(?:'m| am) your host\b", "host references"),
-            (r"\bwelcome back to (?:the |my )?channel\b", "host references"),
-        ]
-        for pattern, label in forbidden:
+        """Reject scripts that contain intro/meta phrases or non-spoken artifacts."""
+        for pattern, label in FORBIDDEN_PHRASE_PATTERNS:
             if re.search(pattern, script, re.I):
                 raise ScriptValidationError(f"Script contains forbidden content: {label}.")
