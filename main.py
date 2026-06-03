@@ -1,8 +1,17 @@
-"""CLI entry point for YouTube Shorts Phase 1–4: script through video."""
+"""CLI entry point for YouTube Shorts Phase 1–4.5A: script through scene agent."""
 
 import logging
 import sys
 
+from agents.scene_agent import (
+    SceneAgent,
+    SceneAgentError,
+    SceneGenerationError,
+    SceneOllamaConnectionError,
+    SceneOllamaModelError,
+    SceneValidationError,
+    ScriptNotFoundError as SceneScriptNotFoundError,
+)
 from caption_generator import (
     AudioNotFoundError,
     CaptionGenerationError,
@@ -73,6 +82,7 @@ def main() -> int:
     voice_generator = VoiceGenerator()
     caption_generator = CaptionGenerator()
     video_generator = VideoGenerator()
+    scene_agent = SceneAgent()
 
     try:
         logger.info("Phase 1: generating script")
@@ -194,6 +204,32 @@ def main() -> int:
         return 1
 
     print(f"\nVideo saved -> {video_path}")
+
+    try:
+        logger.info("Phase 4.5A: generating visual scenes")
+        print("\nPhase 4.5A — Scene Agent")
+        _, scenes_path = scene_agent.generate()
+    except SceneScriptNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except SceneOllamaConnectionError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except SceneOllamaModelError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except SceneValidationError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        print("Tip: Try running again; model output can vary.", file=sys.stderr)
+        return 1
+    except SceneGenerationError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except SceneAgentError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"\nScenes saved -> {scenes_path}")
     return 0
 
 
