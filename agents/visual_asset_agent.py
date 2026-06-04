@@ -130,12 +130,14 @@ class SearchCache:
         self.cache_dir = cache_dir
         self.ttl_seconds = ttl_seconds
 
-    def _path(self, provider: str, query: str) -> Path:
-        digest = hashlib.sha256(f"{provider}:{query.lower()}".encode()).hexdigest()[:16]
+    def _path(self, provider: str, query: str, orientation: str = "") -> Path:
+        digest = hashlib.sha256(
+            f"{provider}:{query.lower()}:{orientation}".encode()
+        ).hexdigest()[:16]
         return self.cache_dir / f"{provider}_{digest}.json"
 
-    def get(self, provider: str, query: str) -> list[dict[str, Any]] | None:
-        path = self._path(provider, query)
+    def get(self, provider: str, query: str, orientation: str = "") -> list[dict[str, Any]] | None:
+        path = self._path(provider, query, orientation)
         if not path.is_file():
             return None
         try:
@@ -149,9 +151,9 @@ class SearchCache:
         results = payload.get("results")
         return results if isinstance(results, list) else None
 
-    def set(self, provider: str, query: str, results: list[dict[str, Any]]) -> None:
+    def set(self, provider: str, query: str, results: list[dict[str, Any]], orientation: str = "") -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        path = self._path(provider, query)
+        path = self._path(provider, query, orientation)
         payload = {
             "provider": provider,
             "query": query,
@@ -178,18 +180,23 @@ class PexelsClient:
                 "PEXELS_API_KEY is not set. Add it to your .env file."
             )
 
-    def search(self, query: str, per_page: int = 15) -> list[ImageCandidate]:
-        """Search Pexels for portrait, high-resolution photos."""
+    def search(
+        self,
+        query: str,
+        per_page: int = 15,
+        orientation: str = "portrait",
+    ) -> list[ImageCandidate]:
+        """Search Pexels for high-resolution photos (portrait or landscape)."""
         self._require_key()
-        cached = self.cache.get("pexels", query)
+        cached = self.cache.get("pexels", query, orientation)
         if cached is not None:
-            logger.info("Pexels cache hit for query: %s", query)
+            logger.info("Pexels cache hit for query: %s (%s)", query, orientation)
             return [self._candidate_from_cache(item) for item in cached if item]
 
         params = {
             "query": query,
             "per_page": per_page,
-            "orientation": "portrait",
+            "orientation": orientation,
         }
         try:
             response = self.session.get(
@@ -240,9 +247,14 @@ class PexelsClient:
                 }
             )
 
-        self.cache.set("pexels", query, cache_payload)
+        self.cache.set("pexels", query, cache_payload, orientation)
         candidates.sort(key=lambda c: c.score(), reverse=True)
-        logger.info("Pexels returned %d suitable images for: %s", len(candidates), query)
+        logger.info(
+            "Pexels returned %d suitable images for: %s (%s)",
+            len(candidates),
+            query,
+            orientation,
+        )
         return candidates
 
     @staticmethod
@@ -270,19 +282,24 @@ class PixabayClient:
                 "PIXABAY_API_KEY is not set. Add it to your .env file."
             )
 
-    def search(self, query: str, per_page: int = 15) -> list[ImageCandidate]:
-        """Search Pixabay for vertical, high-resolution photos."""
+    def search(
+        self,
+        query: str,
+        per_page: int = 15,
+        orientation: str = "vertical",
+    ) -> list[ImageCandidate]:
+        """Search Pixabay for high-resolution photos (vertical or horizontal)."""
         self._require_key()
-        cached = self.cache.get("pixabay", query)
+        cached = self.cache.get("pixabay", query, orientation)
         if cached is not None:
-            logger.info("Pixabay cache hit for query: %s", query)
+            logger.info("Pixabay cache hit for query: %s (%s)", query, orientation)
             return [self._candidate_from_cache(item) for item in cached if item]
 
         params = {
             "key": self.api_key,
             "q": query,
             "image_type": "photo",
-            "orientation": "vertical",
+            "orientation": orientation,
             "per_page": per_page,
             "min_width": MIN_IMAGE_WIDTH,
             "min_height": MIN_IMAGE_HEIGHT,
@@ -335,9 +352,14 @@ class PixabayClient:
                 }
             )
 
-        self.cache.set("pixabay", query, cache_payload)
+        self.cache.set("pixabay", query, cache_payload, orientation)
         candidates.sort(key=lambda c: c.score(), reverse=True)
-        logger.info("Pixabay returned %d suitable images for: %s", len(candidates), query)
+        logger.info(
+            "Pixabay returned %d suitable images for: %s (%s)",
+            len(candidates),
+            query,
+            orientation,
+        )
         return candidates
 
     @staticmethod
@@ -349,6 +371,16 @@ class PixabayClient:
             source="pixabay",
             photographer=str(item.get("photographer") or ""),
         )
+
+
+def landscape_image_score(candidate: ImageCandidate) -> float:
+    """Rank stock photos for 1280×720 thumbnails."""
+    score = float(candidate.pixels)
+    if candidate.width >= candidate.height:
+        score *= 1.3
+    if candidate.width >= 1280 and candidate.height >= 720:
+        score *= 1.15
+    return score
 
 
 class VisualAssetAgent:

@@ -80,7 +80,7 @@ Metadata
 | Scene Agent | ✅ |
 | Visual Timeline Agent | ✅ |
 | Final Video Generation | ✅ |
-| Thumbnail Generation | ✅ |
+| Thumbnail Generation | ✅ (video frame → Pexels → Pixabay → AI) |
 
 ### Core components (shipped)
 
@@ -240,6 +240,23 @@ videos/output.mp4
 | `assets/cache/` | API search cache (24h) |
 | `videos/output.mp4` | Final video (1080×1920) |
 | `thumbnails/output.png` | Thumbnail (1280×720) |
+
+---
+
+## Thumbnail generation
+
+Thumbnails are built to **match the finished video**, not random scene stills. The agent logs the source as:
+
+`Thumbnail Source: Video Frame | Pexels | Pixabay | AI`
+
+### Priority order
+
+1. **Video Frame** — FFmpeg extracts several frames from `videos/output.mp4` (skipping intro/outro). Each frame is scored for **clarity**, **brightness**, **visual appeal**, and **subject visibility**. The highest-scoring frame becomes the background.
+2. **Pexels** — Landscape stock photo search using keywords from the video title and first scene (aligned with video content).
+3. **Pixabay** — Same query if Pexels has no suitable image.
+4. **AI** — Last resort only: a clean composed 1280×720 background tinted from timeline assets (not a generic AI photo).
+
+Bold title text is overlaid on every path. Output is always **1280×720** PNG.
 
 ---
 

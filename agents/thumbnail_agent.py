@@ -1,7 +1,8 @@
-"""Phase 5: Generate YouTube thumbnail from title, scene visuals, or video frame."""
+"""Phase 5: Generate YouTube thumbnail aligned with the final video output."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -12,24 +13,44 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ollama
+import requests
+
+from agents.visual_asset_agent import (
+    ImageCandidate,
+    PexelsClient,
+    PixabayClient,
+    SearchCache,
+    keywords_from_description,
+    landscape_image_score,
+)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "llama3"
 TITLE_PATH = Path("scripts/title.txt")
-SCENES_DIR = Path("assets/scenes")
+SCENES_PATH = Path("scenes/scenes.json")
 TIMELINE_DIR = Path("assets/timeline")
-CLIPS_DIR = Path("assets/clips")
 VIDEO_PATH = Path("videos/output.mp4")
 THUMBNAILS_DIR = Path("thumbnails")
 OUTPUT_PATH = THUMBNAILS_DIR / "output.png"
 
 THUMBNAIL_WIDTH = 1280
 THUMBNAIL_HEIGHT = 720
-PROGRESS_STEPS = 6
+PROGRESS_STEPS = 7
 MAX_THUMBNAIL_WORDS = 4
 MAX_THUMBNAIL_LINES = 2
 DEFAULT_FFMPEG = "ffmpeg"
+
+FRAME_SAMPLE_COUNT = 8
+MIN_FRAME_SCORE = 0.38
+THUMB_MIN_WIDTH = 1280
+THUMB_MIN_HEIGHT = 720
+STOCK_DOWNLOAD_TIMEOUT = 45
+
+SOURCE_VIDEO_FRAME = "Video Frame"
+SOURCE_PEXELS = "Pexels"
+SOURCE_PIXABAY = "Pixabay"
+SOURCE_AI = "AI"
 
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
@@ -139,6 +160,8 @@ class ThumbnailResult:
     title: str
     text: ThumbnailText
     visual_source: str
+    source_type: str
+    frame_score: float | None = None
 
 
 def resolve_ffmpeg() -> str:
@@ -151,12 +174,12 @@ def resolve_ffmpeg() -> str:
 
 def _require_pillow():
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw, ImageFont, ImageStat
     except ImportError as exc:
         raise ThumbnailRenderError(
             "Pillow is required for thumbnails. Run: pip install Pillow"
         ) from exc
-    return Image, ImageDraw, ImageFont
+    return Image, ImageDraw, ImageFont, ImageStat
 
 
 class ThumbnailAgent:
@@ -167,21 +190,27 @@ class ThumbnailAgent:
         model: str = DEFAULT_MODEL,
         title_path: Path | str = TITLE_PATH,
         output_path: Path | str = OUTPUT_PATH,
-        scenes_dir: Path | str = SCENES_DIR,
-        clips_dir: Path | str = CLIPS_DIR,
+        scenes_path: Path | str = SCENES_PATH,
         video_path: Path | str = VIDEO_PATH,
+        pexels_client: PexelsClient | None = None,
+        pixabay_client: PixabayClient | None = None,
     ) -> None:
         self.model = model
         self.title_path = Path(title_path)
         self.output_path = Path(output_path)
-        self.scenes_dir = Path(scenes_dir)
+        self.scenes_path = Path(scenes_path)
         self.timeline_dir = TIMELINE_DIR
-        self.clips_dir = Path(clips_dir)
         self.video_path = Path(video_path)
         self.ffmpeg = resolve_ffmpeg()
+        cache = SearchCache()
+        self.pexels = pexels_client or PexelsClient(cache=cache)
+        self.pixabay = pixabay_client or PixabayClient(cache=cache)
         self._title = ""
         self._text = ThumbnailText("", "")
         self._background_path: Path | None = None
+        self._source_type = ""
+        self._frame_score: float | None = None
+        self._frame_temp_dir: Path | None = None
 
     def generate(self) -> ThumbnailResult:
         """Create thumbnails/output.png from title and best available visual."""
@@ -192,9 +221,12 @@ class ThumbnailAgent:
         self._text = self._generate_thumbnail_text(self._title)
         logger.info("Thumbnail text: %s / %s", self._text.line1, self._text.line2)
 
-        self._print_progress(2, "Selecting visual...")
-        self._background_path = self._select_visual()
-        logger.info("Visual source: %s", self._background_path)
+        self._print_progress(2, "Analyzing video & selecting visual...")
+        self._background_path, self._source_type, self._frame_score = self._select_visual()
+        logger.info("Thumbnail Source: %s", self._source_type)
+        logger.info("Background file: %s", self._background_path)
+        if self._frame_score is not None:
+            logger.info("Best frame score: %.3f", self._frame_score)
 
         self._print_progress(3, "Creating layout...")
         canvas = self._build_canvas(self._background_path)
@@ -207,11 +239,14 @@ class ThumbnailAgent:
 
         self._print_progress(6, "Completed")
         self._verify_output()
+        self._cleanup_frame_temp_dir()
         result = ThumbnailResult(
             output_path=self.output_path.resolve(),
             title=self._title,
             text=self._text,
             visual_source=str(self._background_path),
+            source_type=self._source_type,
+            frame_score=self._frame_score,
         )
         self._print_summary(result)
         return result
@@ -331,94 +366,112 @@ class ThumbnailAgent:
         logger.info("Using fallback thumbnail text: %s / %s", text.line1, text.line2)
         return text
 
-    def _select_visual(self) -> Path:
-        image = self._best_image_in_dirs(
-            [self.scenes_dir, self.timeline_dir],
-            label="scene images",
-        )
-        if image:
-            print(f"  Using scene image: {image.name}", flush=True)
-            return image
-
-        clip_image = self._best_image_in_dirs([self.clips_dir], label="clips")
-        if clip_image:
-            print(f"  Using clip image: {clip_image.name}", flush=True)
-            return clip_image
-
-        clip_video = self._best_video_in_dir(self.clips_dir)
-        if clip_video:
-            print(f"  Extracting frame from clip: {clip_video.name}", flush=True)
-            return self._extract_video_frame(clip_video)
-
+    def _select_visual(self) -> tuple[Path, str, float | None]:
+        """Priority: video frame → Pexels → Pixabay → AI."""
         if self.video_path.is_file() and self.video_path.stat().st_size > 0:
-            print(f"  Extracting frame from: {self.video_path.name}", flush=True)
-            return self._extract_video_frame(self.video_path)
-
-        raise VisualSourceNotFoundError(
-            "No visual source found. Expected images in assets/scenes/ or "
-            "assets/timeline/, assets/clips/, or videos/output.mp4."
-        )
-
-    def _best_image_in_dirs(
-        self,
-        directories: list[Path],
-        label: str,
-    ) -> Path | None:
-        best: tuple[int, Path] | None = None
-        for directory in directories:
-            if not directory.is_dir():
-                continue
-            for path in directory.iterdir():
-                if not path.is_file():
-                    continue
-                if path.suffix.lower() not in IMAGE_EXTENSIONS:
-                    continue
-                score = self._image_quality_score(path)
-                if score <= 0:
-                    continue
-                if best is None or score > best[0]:
-                    best = (score, path)
-        if best:
-            logger.info("Best %s: %s (score %d)", label, best[1].name, best[0])
-        return best[1] if best else None
-
-    def _image_quality_score(self, path: Path) -> int:
-        Image, _, _ = _require_pillow()
-        try:
-            with Image.open(path) as img:
-                width, height = img.size
-                pixels = width * height
-                if pixels < 640 * 360:
-                    return 0
-                portrait_bonus = 1_000_000 if height > width else 0
-                return pixels + portrait_bonus
-        except OSError as exc:
-            logger.debug("Skipping unreadable image %s: %s", path, exc)
-            return 0
-
-    def _best_video_in_dir(self, directory: Path) -> Path | None:
-        if not directory.is_dir():
-            return None
-        videos = [
-            p
-            for p in directory.iterdir()
-            if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
-        ]
-        if not videos:
-            return None
-        videos.sort(key=lambda p: p.stat().st_size, reverse=True)
-        return videos[0]
-
-    def _extract_video_frame(self, video_path: Path) -> Path:
-        if shutil.which(self.ffmpeg) is None and not Path(self.ffmpeg).is_file():
-            raise FFmpegNotFoundError(
-                "FFmpeg not found. Install FFmpeg to extract a thumbnail frame."
+            frame_path, score = self._best_frame_from_video(self.video_path)
+            if frame_path and score >= MIN_FRAME_SCORE:
+                print(
+                    f"  Thumbnail Source: {SOURCE_VIDEO_FRAME} (score {score:.2f})",
+                    flush=True,
+                )
+                return frame_path, SOURCE_VIDEO_FRAME, score
+            logger.info(
+                "No suitable video frame (best score %.3f < %.2f); trying stock",
+                score or 0,
+                MIN_FRAME_SCORE,
             )
 
-        temp_dir = Path(tempfile.mkdtemp(prefix="yt_thumb_frame_"))
-        frame_path = temp_dir / "frame.jpg"
-        timestamp = self._pick_frame_timestamp(video_path)
+        query = self._thumbnail_search_query()
+        pexels_path = self._fetch_stock_image(self.pexels, query, SOURCE_PEXELS, "landscape")
+        if pexels_path:
+            return pexels_path, SOURCE_PEXELS, None
 
+        pixabay_path = self._fetch_stock_image(
+            self.pixabay, query, SOURCE_PIXABAY, "horizontal"
+        )
+        if pixabay_path:
+            return pixabay_path, SOURCE_PIXABAY, None
+
+        print(f"  Thumbnail Source: {SOURCE_AI} (composed fallback)", flush=True)
+        return self._generate_ai_fallback_background(), SOURCE_AI, None
+
+    def _thumbnail_search_query(self) -> str:
+        """Build a stock search query aligned with video content."""
+        scene_text = ""
+        if self.scenes_path.is_file():
+            try:
+                data = json.loads(self.scenes_path.read_text(encoding="utf-8"))
+                scenes = data if isinstance(data, list) else data.get("scenes", [])
+                if scenes and isinstance(scenes[0], dict):
+                    first = scenes[0]
+                    scene_text = (
+                        f"{first.get('title', '')} {first.get('visual_description', '')}"
+                    )
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.debug("Could not read scenes for thumbnail query: %s", exc)
+
+        if scene_text.strip():
+            return keywords_from_description(scene_text, self._title)
+        return keywords_from_description(self._title, self._title)
+
+    def _best_frame_from_video(self, video_path: Path) -> tuple[Path | None, float]:
+        """Extract multiple frames and pick the highest-quality candidate."""
+        if shutil.which(self.ffmpeg) is None and not Path(self.ffmpeg).is_file():
+            logger.warning("FFmpeg not found; skipping video frame analysis")
+            return None, 0.0
+
+        self._cleanup_frame_temp_dir()
+        self._frame_temp_dir = Path(tempfile.mkdtemp(prefix="yt_thumb_frames_"))
+        timestamps = self._sample_frame_timestamps(video_path)
+        best_path: Path | None = None
+        best_score = 0.0
+
+        for index, timestamp in enumerate(timestamps):
+            frame_path = self._frame_temp_dir / f"frame_{index:02d}.jpg"
+            if not self._extract_frame_at(video_path, timestamp, frame_path):
+                continue
+            score = self._score_frame(frame_path)
+            logger.info(
+                "Frame sample %d @ %.2fs — score %.3f",
+                index + 1,
+                timestamp,
+                score,
+            )
+            if score > best_score:
+                best_score = score
+                best_path = frame_path
+
+        if best_path:
+            logger.info(
+                "Selected best frame from %s (score %.3f)",
+                video_path.name,
+                best_score,
+            )
+        return best_path, best_score
+
+    def _sample_frame_timestamps(self, video_path: Path) -> list[float]:
+        try:
+            from agents.timeline_video_builder import probe_duration, resolve_ffmpeg_tool
+
+            ffprobe = resolve_ffmpeg_tool("ffprobe", "FFPROBE_EXECUTABLE")
+            duration = probe_duration(video_path, ffprobe)
+        except Exception:
+            duration = 30.0
+
+        if duration < 1.0:
+            return [0.0]
+
+        start = max(0.5, duration * 0.12)
+        end = max(start + 0.5, duration * 0.88)
+        count = max(3, FRAME_SAMPLE_COUNT)
+        if count == 1 or end <= start:
+            return [min(duration * 0.35, duration - 0.1)]
+
+        step = (end - start) / (count - 1)
+        return [round(start + step * i, 2) for i in range(count)]
+
+    def _extract_frame_at(self, video_path: Path, timestamp: float, out_path: Path) -> bool:
         command = [
             self.ffmpeg,
             "-y",
@@ -430,7 +483,7 @@ class ThumbnailAgent:
             "1",
             "-q:v",
             "2",
-            str(frame_path),
+            str(out_path),
         ]
         try:
             result = subprocess.run(
@@ -441,25 +494,167 @@ class ThumbnailAgent:
                 check=False,
             )
         except OSError as exc:
-            raise ThumbnailRenderError(f"Failed to run FFmpeg: {exc}") from exc
+            logger.debug("Frame extract failed: %s", exc)
+            return False
+        return result.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0
 
-        if result.returncode != 0 or not frame_path.is_file():
-            stderr = (result.stderr or "").strip()
-            raise ThumbnailRenderError(
-                f"FFmpeg frame extraction failed: {stderr or 'unknown error'}"
-            )
-        logger.info("Extracted frame at %.2fs from %s", timestamp, video_path.name)
-        return frame_path
-
-    def _pick_frame_timestamp(self, video_path: Path) -> float:
+    def _score_frame(self, frame_path: Path) -> float:
+        """
+        Score frame quality: clarity, brightness, visual appeal, subject visibility.
+        Returns 0.0–1.0 (higher is better).
+        """
+        Image, ImageStat, _ = _require_pillow()
         try:
-            from agents.timeline_video_builder import probe_duration, resolve_ffmpeg_tool
+            with Image.open(frame_path) as img:
+                rgb = img.convert("RGB")
+                thumb = rgb.copy()
+                thumb.thumbnail((480, 270))
+                gray = thumb.convert("L")
+                stat = ImageStat.Stat(thumb)
+                gray_stat = ImageStat.Stat(gray)
 
-            ffprobe = resolve_ffmpeg_tool("ffprobe", "FFPROBE_EXECUTABLE")
-            duration = probe_duration(video_path, ffprobe)
-            return max(0.5, min(duration * 0.35, duration - 0.5))
-        except Exception:
-            return 1.0
+                r, g, b = stat.mean[:3]
+                brightness = 0.299 * r + 0.587 * g + 0.114 * b
+                brightness_score = max(0.0, 1.0 - abs(brightness - 125.0) / 125.0)
+
+                contrast = sum(gray_stat.stddev) / max(len(gray_stat.stddev), 1)
+                clarity_score = min(contrast / 45.0, 1.0)
+
+                max_c = max(r, g, b)
+                min_c = min(r, g, b)
+                saturation = (max_c - min_c) / max_c if max_c > 1 else 0.0
+                appeal_score = min(saturation * 2.5, 1.0) * 0.5 + clarity_score * 0.5
+
+                w, h = gray.size
+                margin_x = int(w * 0.2)
+                margin_y = int(h * 0.2)
+                center = gray.crop((margin_x, margin_y, w - margin_x, h - margin_y))
+                full_std = sum(gray_stat.stddev) / max(len(gray_stat.stddev), 1)
+                center_std = sum(ImageStat.Stat(center).stddev) / max(
+                    len(ImageStat.Stat(center).stddev), 1
+                )
+                subject_score = min(center_std / (full_std + 1.0), 1.2) / 1.2
+
+                return (
+                    clarity_score * 0.35
+                    + brightness_score * 0.25
+                    + appeal_score * 0.2
+                    + subject_score * 0.2
+                )
+        except OSError as exc:
+            logger.debug("Frame score failed for %s: %s", frame_path, exc)
+            return 0.0
+
+    def _fetch_stock_image(
+        self,
+        client: PexelsClient | PixabayClient,
+        query: str,
+        source_label: str,
+        orientation: str,
+    ) -> Path | None:
+        api_key = getattr(client, "api_key", "")
+        if not api_key:
+            logger.warning("%s API key not set; skipping", source_label)
+            return None
+
+        try:
+            candidates = client.search(query, per_page=12, orientation=orientation)
+        except Exception as exc:
+            logger.warning("%s search failed: %s", source_label, exc)
+            return None
+
+        suitable = [
+            c
+            for c in candidates
+            if c.width >= THUMB_MIN_WIDTH and c.height >= THUMB_MIN_HEIGHT
+        ]
+        if not suitable:
+            suitable = [
+                c for c in candidates if c.width >= 960 and c.height >= 540
+            ]
+        if not suitable:
+            logger.info("%s returned no images large enough for thumbnail", source_label)
+            return None
+
+        suitable.sort(key=landscape_image_score, reverse=True)
+        best = suitable[0]
+        path = self._download_stock_image(best, source_label)
+        if path:
+            print(f"  Thumbnail Source: {source_label} — {best.url[:60]}...", flush=True)
+        return path
+
+    def _download_stock_image(self, candidate: ImageCandidate, label: str) -> Path | None:
+        temp_dir = Path(tempfile.mkdtemp(prefix="yt_thumb_stock_"))
+        ext = ".jpg"
+        if ".png" in candidate.url.lower():
+            ext = ".png"
+        dest = temp_dir / f"stock{ext}"
+        try:
+            response = requests.get(candidate.url, timeout=STOCK_DOWNLOAD_TIMEOUT)
+            response.raise_for_status()
+            dest.write_bytes(response.content)
+        except requests.RequestException as exc:
+            logger.warning("%s download failed: %s", label, exc)
+            return None
+
+        Image, _, _ = _require_pillow()
+        try:
+            with Image.open(dest) as img:
+                if img.size[0] < 640 or img.size[1] < 360:
+                    logger.warning("Downloaded %s image too small: %s", label, img.size)
+                    return None
+        except OSError:
+            return None
+        return dest
+
+    def _generate_ai_fallback_background(self) -> Path:
+        """Last resort: clean composed 1280×720 background (logged as AI)."""
+        Image, ImageDraw, _ = _require_pillow()
+        temp_dir = Path(tempfile.mkdtemp(prefix="yt_thumb_ai_"))
+        path = temp_dir / "ai_background.png"
+
+        accent = self._accent_color_from_timeline()
+        img = Image.new("RGB", (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), accent)
+        draw = ImageDraw.Draw(img)
+        for y in range(THUMBNAIL_HEIGHT):
+            blend = y / THUMBNAIL_HEIGHT
+            shade = int(accent[0] * (1 - blend * 0.55))
+            draw.line([(0, y), (THUMBNAIL_WIDTH, y)], fill=(shade, shade, shade))
+
+        cx, cy = THUMBNAIL_WIDTH // 2, THUMBNAIL_HEIGHT // 2
+        radius = int(min(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT) * 0.42)
+        for r in range(radius, 0, -4):
+            alpha = int(28 * (r / radius))
+            box = (cx - r, cy - r, cx + r, cy + r)
+            draw.ellipse(box, fill=(min(255, accent[0] + alpha),) * 3)
+
+        img.save(path, format="PNG")
+        logger.info("AI fallback background composed at %s", path)
+        return path
+
+    def _accent_color_from_timeline(self) -> tuple[int, int, int]:
+        """Sample average color from timeline assets to stay on-brand with the video."""
+        Image, ImageStat, _ = _require_pillow()
+        if not self.timeline_dir.is_dir():
+            return (22, 22, 26)
+
+        for path in sorted(self.timeline_dir.iterdir()):
+            if path.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            try:
+                with Image.open(path) as img:
+                    rgb = img.convert("RGB")
+                    rgb.thumbnail((160, 90))
+                    mean = ImageStat.Stat(rgb).mean[:3]
+                    return tuple(int(v * 0.35) for v in mean)
+            except OSError:
+                continue
+        return (22, 22, 26)
+
+    def _cleanup_frame_temp_dir(self) -> None:
+        if self._frame_temp_dir and self._frame_temp_dir.is_dir():
+            shutil.rmtree(self._frame_temp_dir, ignore_errors=True)
+        self._frame_temp_dir = None
 
     def _build_canvas(self, source: Path) -> object:
         Image, _, _ = _require_pillow()
@@ -484,7 +679,7 @@ class ThumbnailAgent:
         return resized.crop((left, top, left + width, top + height))
 
     def _render_text(self, canvas: object, text: ThumbnailText) -> object:
-        Image, ImageDraw, ImageFont = _require_pillow()
+        Image, ImageDraw, ImageFont, _ = _require_pillow()
         base = canvas.copy()
         overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
@@ -598,5 +793,8 @@ class ThumbnailAgent:
         print("\nThumbnail summary:", flush=True)
         print(f"  Title: {result.title}", flush=True)
         print(f"  Text: {result.text.line1} / {result.text.line2}", flush=True)
+        print(f"  Thumbnail Source: {result.source_type}", flush=True)
+        if result.frame_score is not None:
+            print(f"  Frame score: {result.frame_score:.3f}", flush=True)
         print(f"  Visual: {result.visual_source}", flush=True)
         print(f"  Output: {result.output_path}", flush=True)
