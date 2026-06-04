@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-bg text-text scroll-smooth;
+  }
+
+  body {
+    @apply min-h-screen font-sans bg-bg text-text overflow-x-hidden;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(255, 255, 255, 0.04), transparent),
+      radial-gradient(ellipse 60% 40% at 100% 100%, rgba(255, 255, 255, 0.02), transparent);
+  }
+
+  ::selection {
+    background: rgba(255, 255, 255, 0.15);
+  }
+}
+
+@layer utilities {
+  .neo-panel {
+    background: linear-gradient(145deg, #161616 0%, #111111 100%);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 24px 48px -12px rgba(0, 0, 0, 0.65),
+      0 8px 16px -8px rgba(0, 0, 0, 0.5),
+      -1px -1px 0 rgba(255, 255, 255, 0.03) inset;
+  }
+
+  .neo-panel-elevated {
+    background: linear-gradient(160deg, #1c1c1c 0%, #141414 50%, #111111 100%);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 32px 64px -16px rgba(0, 0, 0, 0.75),
+      0 12px 24px -8px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+
+  .neo-inset {
+    background: #0d0d0d;
+    box-shadow:
+      inset 0 2px 8px rgba(0, 0, 0, 0.6),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+      0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+
+  .neo-button {
+    background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 45%, #141414 100%);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.12) inset,
+      0 4px 12px rgba(0, 0, 0, 0.5),
+      0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+
+  .neo-button:hover {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.16) inset,
+      0 8px 24px rgba(0, 0, 0, 0.55),
+      0 0 24px rgba(255, 255, 255, 0.06);
+  }
+
+  .neo-button:active {
+    box-shadow:
+      inset 0 2px 6px rgba(0, 0, 0, 0.5),
+      0 1px 0 rgba(255, 255, 255, 0.06) inset;
+    transform: translateY(1px);
+  }
+
+  .glass-panel {
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.07) 0%,
+      rgba(255, 255, 255, 0.02) 50%,
+      rgba(255, 255, 255, 0.01) 100%
+    );
+    backdrop-filter: blur(24px) saturate(1.2);
+    -webkit-backdrop-filter: blur(24px) saturate(1.2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 24px 48px -12px rgba(0, 0, 0, 0.6),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
+  .glow-soft {
+    box-shadow: 0 0 40px rgba(255, 255, 255, 0.08);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 32px rgba(255, 255, 255, 0.35);
+  }
+
+  .ring-glow {
+    filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.25));
+  }
+}
