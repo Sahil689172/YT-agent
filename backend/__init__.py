@@ -1,0 +1,1 @@
+"""AutoShorts FastAPI backend."""

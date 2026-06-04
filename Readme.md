@@ -340,6 +340,134 @@ Automation Agent (scheduled runs)
 
 ---
 
+## Backend API Architecture
+
+The FastAPI layer exposes the same pipeline as `main.py` without rewriting generators. Jobs run in a background worker; the pipeline uses shared output paths, so **one job runs at a time** (additional jobs are queued).
+
+```text
+frontend/
+  └── React UI (polls API)
+
+backend/
+  ├── api.py              # FastAPI routes, CORS, request models
+  ├── job_manager.py      # Job IDs, progress, results, artifact copy
+  ├── pipeline_runner.py  # Orchestrates existing generators per phase
+  └── logging_config.py   # JSON structured logs
+
+Existing generators (unchanged):
+  script_generator → metadata_generator → voice_generator →
+  caption_generator → scene_agent → visual_timeline_agent → thumbnail_agent
+```
+
+### Job lifecycle
+
+```text
+POST /generate/topic  or  /generate/script
+        ↓
+   { job_id, status: "started" }
+        ↓
+GET /progress/{job_id}  (poll while running)
+        ↓
+GET /result/{job_id}    (when status is completed)
+```
+
+Per-job artifacts are copied to `jobs/{job_id}/` (video, thumbnail, title, description, hashtags, script).
+
+---
+
+## Available Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | API health check |
+| `POST` | `/generate/topic` | Full pipeline from topic → `{ job_id, status }` |
+| `POST` | `/generate/script` | Pipeline from user script (skips script generation) |
+| `GET` | `/progress/{job_id}` | Live phase, `completed` / `total`, status |
+| `GET` | `/result/{job_id}` | Title, description, hashtags, file paths |
+
+### Example requests
+
+**Topic mode**
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate/topic \
+  -H "Content-Type: application/json" \
+  -d "{\"topic\": \"What is EBITDA?\"}"
+```
+
+**Custom script**
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate/script \
+  -H "Content-Type: application/json" \
+  -d "{\"script\": \"Your narration here...\", \"topic\": \"Finance Short\"}"
+```
+
+**Progress**
+
+```bash
+curl http://127.0.0.1:8000/progress/{job_id}
+```
+
+**Result** (when complete)
+
+```bash
+curl http://127.0.0.1:8000/result/{job_id}
+```
+
+Interactive API docs: `http://127.0.0.1:8000/docs`
+
+---
+
+## Local Development Instructions
+
+### 1. Install Python dependencies
+
+From the project root:
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Environment
+
+Ensure `.env` includes `PEXELS_API_KEY` and `PIXABAY_API_KEY` (required for visual timeline). Ollama, Piper, FFmpeg, and Whisper must be available as for CLI usage.
+
+### 3. Start the API server
+
+From the project root (not inside `backend/`):
+
+```bash
+python -m uvicorn backend.api:app --reload
+```
+
+On Windows, if `uvicorn` is not recognized as a command (pip installed it without adding Scripts to PATH), always use `python -m uvicorn` above, or double-click / run:
+
+```bat
+run_api.bat
+```
+
+Default URL: `http://127.0.0.1:8000`
+
+### 4. Start the frontend (separate terminal)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173`.
+
+### 5. Frontend integration flow
+
+1. `POST /generate/topic` or `/generate/script` → store `job_id`
+2. Poll `GET /progress/{job_id}` every few seconds
+3. When `status` is `completed`, call `GET /result/{job_id}`
+4. Use returned `video_path`, `thumbnail_path`, and metadata in the UI
+
+---
+
 ## License
 
 Add your license here if publishing publicly on GitHub.

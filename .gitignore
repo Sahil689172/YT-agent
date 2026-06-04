@@ -62,6 +62,11 @@ temp/
 tmp/
 *.tmp
 
+# Frontend
+
+frontend/node_modules/
+frontend/dist/
+
 # VS Code
 
 .vscode/
@@ -78,6 +83,10 @@ Desktop.ini
 # FFmpeg Outputs
 
 *.mkv
+
+# API job workspaces (per-job artifacts; structure kept, contents ignored)
+jobs/*/
+!jobs/.gitkeep
 
 # Future Secrets
 
