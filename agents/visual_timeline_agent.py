@@ -231,7 +231,7 @@ class PexelsVideoClient:
                 "PEXELS_API_KEY is not set. Add it to your .env file."
             )
 
-    def search(self, query: str, per_page: int = 15) -> list[VideoCandidate]:
+    def search(self, query: str, per_page: int = 6) -> list[VideoCandidate]:
         self._require_key()
         cached = self.cache.get("pexels_video", query)
         if cached is not None:
@@ -350,8 +350,8 @@ class VisualTimelineAgent:
         topic: str | None = None,
         timer: Any | None = None,
         on_timing_sync: Any | None = None,
-        max_search_workers: int = 8,
-        max_download_workers: int = 6,
+        max_search_workers: int | None = None,
+        max_download_workers: int | None = None,
     ) -> None:
         self.scenes_path = Path(scenes_path)
         self.assets_dir = Path(assets_dir)
@@ -369,8 +369,10 @@ class VisualTimelineAgent:
         self.topic_cache = TopicAssetCache(self.topic) if self.topic else None
         self._timer = timer
         self._on_timing_sync = on_timing_sync
-        self.max_search_workers = max(1, max_search_workers)
-        self.max_download_workers = max(1, max_download_workers)
+        default_search = int(os.environ.get("ASSET_SEARCH_WORKERS", "12"))
+        default_download = int(os.environ.get("ASSET_DOWNLOAD_WORKERS", "10"))
+        self.max_search_workers = max(1, max_search_workers or default_search)
+        self.max_download_workers = max(1, max_download_workers or default_download)
         self._scenes: list[SceneRecord] = []
         self._narration_seconds = 0.0
         self._temp_dir: Path | None = None
@@ -621,35 +623,43 @@ class VisualTimelineAgent:
                         logger.error("Parallel download error: %s", exc)
 
     def _resolve_scene_asset(self, scene: SceneRecord) -> None:
-        """Search Pexels video, Pexels image, and Pixabay in parallel; same priority as sequential."""
+        """Search providers with early exit; parallel image+Pixabay only if no video."""
         if scene.asset_path or scene.pending_url:
             return
 
-        def pexels_video_hits():
-            if not self.pexels_video.api_key:
-                return None
-            candidates = self.pexels_video.search(scene.query)
-            return candidates[0] if candidates else None
+        if self.pexels_video.api_key:
+            try:
+                candidates = self.pexels_video.search(scene.query)
+                if candidates:
+                    best = candidates[0]
+                    scene.asset_kind = "video"
+                    scene.source = "pexels_video"
+                    scene.pending_url = best.url
+                    scene.pending_ext = ".mp4"
+                    logger.info("Scene %d: Pexels video selected", scene.scene_number)
+                    return
+            except Exception as exc:
+                logger.warning("Scene %d Pexels video search failed: %s", scene.scene_number, exc)
 
         def pexels_image_hits():
             if not self.pexels_images.api_key:
                 return None
-            candidates = self.pexels_images.search(scene.query)
+            candidates = self.pexels_images.search(scene.query, per_page=6)
             return candidates[0] if candidates else None
 
         def pixabay_hits():
             if not self.pixabay.api_key:
                 return None
-            candidates = self.pixabay.search(scene.query)
+            candidates = self.pixabay.search(scene.query, per_page=6)
             return candidates[0] if candidates else None
 
-        video_best = image_best = pixabay_best = None
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {
-                executor.submit(pexels_video_hits): "pexels_video",
-                executor.submit(pexels_image_hits): "pexels_image",
-                executor.submit(pixabay_hits): "pixabay",
-            }
+        image_best = pixabay_best = None
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {}
+            if self.pexels_images.api_key:
+                futures[executor.submit(pexels_image_hits)] = "pexels_image"
+            if self.pixabay.api_key:
+                futures[executor.submit(pixabay_hits)] = "pixabay"
             for future in as_completed(futures):
                 source = futures[future]
                 try:
@@ -662,20 +672,10 @@ class VisualTimelineAgent:
                         exc,
                     )
                     continue
-                if source == "pexels_video":
-                    video_best = hit
-                elif source == "pexels_image":
+                if source == "pexels_image":
                     image_best = hit
                 else:
                     pixabay_best = hit
-
-        if video_best:
-            scene.asset_kind = "video"
-            scene.source = "pexels_video"
-            scene.pending_url = video_best.url
-            scene.pending_ext = ".mp4"
-            logger.info("Scene %d: Pexels video selected", scene.scene_number)
-            return
 
         if image_best:
             scene.asset_kind = "image"

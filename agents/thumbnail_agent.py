@@ -50,6 +50,7 @@ THUMB_MIN_HEIGHT = 720
 STOCK_DOWNLOAD_TIMEOUT = 45
 
 SOURCE_VIDEO_FRAME = "Video Frame"
+SOURCE_TIMELINE = "Timeline Asset"
 SOURCE_PEXELS = "Pexels"
 SOURCE_PIXABAY = "Pixabay"
 SOURCE_AI = "AI"
@@ -382,7 +383,12 @@ class ThumbnailAgent:
         return text
 
     def _select_visual(self) -> tuple[Path, str, float | None]:
-        """Priority: video frame → Pexels → Pixabay → AI."""
+        """Priority: timeline assets → video frame → AI (no new stock API searches)."""
+        timeline_path = self._reuse_timeline_asset()
+        if timeline_path:
+            print(f"  Thumbnail Source: {SOURCE_TIMELINE} (reused scene asset)", flush=True)
+            return timeline_path, SOURCE_TIMELINE, None
+
         if self.video_path.is_file() and self.video_path.stat().st_size > 0:
             frame_path, score = self._best_frame_from_video(self.video_path)
             if frame_path and score >= MIN_FRAME_SCORE:
@@ -392,20 +398,62 @@ class ThumbnailAgent:
                 )
                 return frame_path, SOURCE_VIDEO_FRAME, score
             logger.info(
-                "No suitable video frame (best score %.3f < %.2f); trying stock",
+                "No suitable video frame (best score %.3f < %.2f); using fallback",
                 score or 0,
                 MIN_FRAME_SCORE,
             )
 
-        query = self._thumbnail_search_query()
-        pexels_path, pixabay_path = self._fetch_stock_images_parallel(query)
-        if pexels_path:
-            return pexels_path, SOURCE_PEXELS, None
-        if pixabay_path:
-            return pixabay_path, SOURCE_PIXABAY, None
-
         print(f"  Thumbnail Source: {SOURCE_AI} (composed fallback)", flush=True)
         return self._generate_ai_fallback_background(), SOURCE_AI, None
+
+    def _reuse_timeline_asset(self) -> Path | None:
+        """Pick a downloaded scene image from assets/timeline (no API calls)."""
+        if not self.timeline_dir.is_dir():
+            return None
+
+        candidates: list[Path] = []
+        for path in sorted(self.timeline_dir.iterdir()):
+            if not path.is_file():
+                continue
+            suffix = path.suffix.lower()
+            if suffix in IMAGE_EXTENSIONS and path.stat().st_size > 10_000:
+                candidates.append(path)
+            elif suffix in VIDEO_EXTENSIONS:
+                candidates.append(path)
+
+        for path in candidates:
+            if path.suffix.lower() in IMAGE_EXTENSIONS:
+                logger.info("Thumbnail reusing timeline image: %s", path.name)
+                return path
+
+        for path in candidates:
+            if path.suffix.lower() not in VIDEO_EXTENSIONS:
+                continue
+            frame_path = self._extract_thumbnail_frame_from_clip(path)
+            if frame_path:
+                logger.info("Thumbnail reusing frame from timeline video: %s", path.name)
+                return frame_path
+
+        return None
+
+    def _extract_thumbnail_frame_from_clip(self, video_path: Path) -> Path | None:
+        """Extract one mid-point frame from a timeline clip without scoring pass."""
+        if shutil.which(self.ffmpeg) is None and not Path(self.ffmpeg).is_file():
+            return None
+        self._cleanup_frame_temp_dir()
+        self._frame_temp_dir = Path(tempfile.mkdtemp(prefix="yt_thumb_clip_"))
+        out_path = self._frame_temp_dir / "timeline_frame.jpg"
+        try:
+            from agents.timeline_video_builder import probe_duration, resolve_ffmpeg_tool
+
+            ffprobe = resolve_ffmpeg_tool("ffprobe", "FFPROBE_EXECUTABLE")
+            duration = probe_duration(video_path, ffprobe)
+            timestamp = max(0.5, duration * 0.35)
+        except Exception:
+            timestamp = 1.0
+        if self._extract_frame_at(video_path, timestamp, out_path):
+            return out_path
+        return None
 
     def _thumbnail_search_query(self) -> str:
         """Build a stock search query aligned with video content."""

@@ -19,6 +19,7 @@ from pipeline_timing import (
     PHASE_THUMBNAIL,
     PHASE_VOICE,
     PipelineTimer,
+    log_optimization_banner,
 )
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -43,6 +44,7 @@ def run_job(job_id: str, job_manager: JobManager) -> None:
     os.chdir(ROOT_DIR)
 
     timer = PipelineTimer()
+    log_optimization_banner()
 
     if job.mode == "topic":
         _run_topic_pipeline(job_id, job.topic, job_manager, timer)

@@ -183,7 +183,7 @@ class PexelsClient:
     def search(
         self,
         query: str,
-        per_page: int = 15,
+        per_page: int = 6,
         orientation: str = "portrait",
     ) -> list[ImageCandidate]:
         """Search Pexels for high-resolution photos (portrait or landscape)."""
@@ -285,7 +285,7 @@ class PixabayClient:
     def search(
         self,
         query: str,
-        per_page: int = 15,
+        per_page: int = 6,
         orientation: str = "vertical",
     ) -> list[ImageCandidate]:
         """Search Pixabay for high-resolution photos (vertical or horizontal)."""

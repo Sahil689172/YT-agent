@@ -282,11 +282,22 @@ TOTAL: 77.9 sec
 
 Timings appear in the **CLI terminal**, **FastAPI JSON logs** (`PERF` lines), and the **frontend processing screen** (`/progress/{job_id}` → `phase_timings`).
 
+### Optimization sprint (runtime targets)
+
+| Phase | Target | Technique |
+|-------|--------|-----------|
+| Metadata | &lt; 15 sec | **One** Ollama call → `TITLE:` / `DESCRIPTION:` / `HASHTAGS:` |
+| Scene Agent | &lt; 20 sec | **One** Ollama JSON call (max 2 retries), truncated script in prompt |
+| Asset Search | &lt; 30 sec | Parallel per scene, early-exit (video first), 12 search / 10 download workers |
+| Total | &lt; 180 sec | Thumbnail reuses timeline assets or video frame (no new stock API) |
+
+Timings print at job start (optimization banner) and end (summary with OK/OVER vs targets).
+
 ### Parallel asset search
 
-- **Visual timeline:** All scenes search in parallel; within each scene, Pexels video, Pexels image, and Pixabay run **at the same time** (same source priority as before).
-- **Downloads:** Scene asset downloads run in parallel.
-- **Thumbnail:** Pexels and Pixabay stock searches run **at the same time** when a video frame is not used.
+- **Visual timeline:** All scenes search in parallel; per scene, Pexels video is tried first, then Pexels image + Pixabay in parallel only if needed.
+- **Downloads:** Scene asset downloads run in parallel (file + topic cache).
+- **Thumbnail:** Uses `assets/timeline/` scene files or a frame from `videos/output.mp4` — no Pexels/Pixabay thumbnail searches.
 
 ### Faster captions (script-first)
 

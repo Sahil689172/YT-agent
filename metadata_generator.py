@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,7 +18,37 @@ TITLE_PATH = SCRIPTS_DIR / "title.txt"
 DESCRIPTION_PATH = SCRIPTS_DIR / "description.txt"
 HASHTAGS_PATH = SCRIPTS_DIR / "hashtags.txt"
 HASHTAG_COUNT = 10
+MAX_SCRIPT_CHARS_IN_PROMPT = 3500
 
+COMBINED_SYSTEM = """You write YouTube Shorts metadata in one response.
+Rules:
+- Output exactly three labeled sections: TITLE, DESCRIPTION, HASHTAGS
+- TITLE: one line, catchy but not clickbait, under 70 characters, no quotes
+- DESCRIPTION: exactly 2 or 3 short paragraphs separated by a blank line, no hashtags
+- HASHTAGS: exactly 10 lines, each starting with # (e.g. #Shorts)
+- No extra commentary outside the three sections"""
+
+COMBINED_USER_TEMPLATE = """Topic: {topic}
+
+Script:
+{script}
+
+Respond in this exact format:
+
+TITLE:
+<one line title>
+
+DESCRIPTION:
+<paragraph 1>
+
+<paragraph 2>
+
+HASHTAGS:
+#tag1
+#tag2
+(... 10 hashtags total)"""
+
+# Legacy prompts kept for optional individual generators / tests
 TITLE_SYSTEM = """You write YouTube Shorts titles.
 Rules:
 - One line only
@@ -70,6 +101,18 @@ class VideoMetadata:
     hashtags: list[str]
 
 
+def _script_for_prompt(script: str, max_chars: int = MAX_SCRIPT_CHARS_IN_PROMPT) -> str:
+    script = script.strip()
+    if len(script) <= max_chars:
+        return script
+    logger.info(
+        "Metadata prompt: using first %d chars of script (%d total)",
+        max_chars,
+        len(script),
+    )
+    return script[:max_chars].rsplit(" ", 1)[0] + "…"
+
+
 class MetadataGenerator:
     """Generate and persist YouTube title, description, and hashtags."""
 
@@ -86,49 +129,19 @@ class MetadataGenerator:
         self.hashtags_path = Path(hashtags_path)
 
     def generate_title(self, script: str, topic: str) -> str:
-        """Generate a YouTube title from script context."""
-        logger.info("Generating YouTube title")
-        prompt = (
-            f"Topic: {topic}\n\n"
-            f"Script:\n{script}\n\n"
-            "Write one non-clickbait YouTube Shorts title for this video."
-        )
-        raw = self._chat(TITLE_SYSTEM, prompt)
-        title = self._clean_single_line(raw)
-        self._validate_title(title)
-        logger.info("Title generated (%d chars)", len(title))
-        return title
+        """Generate a YouTube title from script context (legacy single-field call)."""
+        return self.generate(script, topic).title
 
     def generate_description(self, script: str, topic: str) -> str:
-        """Generate a 2-3 paragraph YouTube description from script context."""
-        logger.info("Generating YouTube description")
-        prompt = (
-            f"Topic: {topic}\n\n"
-            f"Script:\n{script}\n\n"
-            "Write a 2-3 short paragraph YouTube description for this Short."
-        )
-        raw = self._chat(DESCRIPTION_SYSTEM, prompt)
-        description = self._clean_description(raw)
-        self._validate_description(description)
-        logger.info("Description generated (%d paragraphs)", len(self._paragraphs(description)))
-        return description
+        """Generate description (legacy single-field call)."""
+        return self.generate(script, topic).description
 
     def generate_hashtags(self, script: str, topic: str) -> list[str]:
-        """Generate exactly 10 hashtags from script context."""
-        logger.info("Generating hashtags")
-        prompt = (
-            f"Topic: {topic}\n\n"
-            f"Script:\n{script}\n\n"
-            f"Write exactly {HASHTAG_COUNT} relevant hashtags, one per line."
-        )
-        raw = self._chat(HASHTAGS_SYSTEM, prompt)
-        hashtags = self._parse_hashtags(raw)
-        self._validate_hashtags(hashtags)
-        logger.info("Hashtags generated (%d tags)", len(hashtags))
-        return hashtags
+        """Generate hashtags (legacy single-field call)."""
+        return self.generate(script, topic).hashtags
 
     def generate(self, script: str, topic: str) -> VideoMetadata:
-        """Generate title, description, and hashtags using the script as context."""
+        """Generate title, description, and hashtags in one Ollama request."""
         script = script.strip()
         topic = topic.strip()
         if not script:
@@ -136,10 +149,29 @@ class MetadataGenerator:
         if not topic:
             raise MetadataGeneratorError("Topic cannot be empty.")
 
-        logger.info("Starting metadata generation for topic: %s", topic)
-        title = self.generate_title(script, topic)
-        description = self.generate_description(script, topic)
-        hashtags = self.generate_hashtags(script, topic)
+        logger.info(
+            "Starting metadata generation (single Ollama call) for topic: %s",
+            topic,
+        )
+        started = time.perf_counter()
+        prompt = COMBINED_USER_TEMPLATE.format(
+            topic=topic,
+            script=_script_for_prompt(script),
+        )
+        raw = self._chat(COMBINED_SYSTEM, prompt)
+        title, description, hashtags = self._parse_combined_response(raw)
+        self._validate_title(title)
+        self._validate_description(description)
+        self._validate_hashtags(hashtags)
+        elapsed = time.perf_counter() - started
+        logger.info(
+            "Metadata generated in one call (%.2f sec): title=%d chars, "
+            "%d paragraphs, %d hashtags",
+            elapsed,
+            len(title),
+            len(self._paragraphs(description)),
+            len(hashtags),
+        )
         return VideoMetadata(title=title, description=description, hashtags=hashtags)
 
     def save(self, metadata: VideoMetadata) -> tuple[Path, Path, Path]:
@@ -168,6 +200,47 @@ class MetadataGenerator:
         paths = self.save(metadata)
         return metadata, *paths
 
+    def _parse_combined_response(self, raw: str) -> tuple[str, str, list[str]]:
+        text = raw.strip()
+        title_match = re.search(
+            r"TITLE:\s*(.+?)(?=\n\s*DESCRIPTION:|\Z)",
+            text,
+            re.I | re.S,
+        )
+        desc_match = re.search(
+            r"DESCRIPTION:\s*(.+?)(?=\n\s*HASHTAGS:|\Z)",
+            text,
+            re.I | re.S,
+        )
+        tags_match = re.search(r"HASHTAGS:\s*(.+)", text, re.I | re.S)
+
+        if not title_match or not desc_match or not tags_match:
+            logger.warning(
+                "Combined metadata missing section headers; falling back to line parsing"
+            )
+            return self._parse_combined_fallback(text)
+
+        title = self._clean_single_line(title_match.group(1).strip())
+        description = self._clean_description(desc_match.group(1).strip())
+        hashtags = self._parse_hashtags(tags_match.group(1).strip())
+        return title, description, hashtags
+
+    def _parse_combined_fallback(self, text: str) -> tuple[str, str, list[str]]:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if len(lines) < 3:
+            raise MetadataValidationError(
+                "Could not parse TITLE / DESCRIPTION / HASHTAGS from model output."
+            )
+        title = self._clean_single_line(lines[0])
+        tag_start = next(
+            (index for index, line in enumerate(lines) if line.startswith("#")),
+            len(lines),
+        )
+        hashtags = self._parse_hashtags("\n".join(lines[tag_start:]))
+        body_lines = lines[1:tag_start]
+        description = self._clean_description("\n\n".join(body_lines))
+        return title, description, hashtags
+
     def _chat(self, system: str, user: str) -> str:
         try:
             response = ollama.chat(
@@ -176,6 +249,7 @@ class MetadataGenerator:
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
+                options={"num_predict": 900, "temperature": 0.4},
             )
         except ConnectionError as exc:
             logger.error("Ollama connection failed")
@@ -214,6 +288,8 @@ class MetadataGenerator:
     def _clean_description(text: str) -> str:
         text = re.sub(r"^(description)\s*:\s*", "", text.strip(), flags=re.I)
         paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
+        if not paragraphs:
+            paragraphs = [line for line in text.splitlines() if line.strip()]
         return "\n\n".join(paragraphs)
 
     @staticmethod

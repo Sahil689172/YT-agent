@@ -26,6 +26,13 @@ PHASE_FINALIZATION = "Finalization"
 # Backward-compatible aliases used by main.py imports
 PHASE_SCRIPT = PHASE_SCRIPT_GENERATION
 
+OPTIMIZATION_TARGETS_SEC = {
+    PHASE_METADATA: 15,
+    PHASE_SCENES: 20,
+    PHASE_ASSET_SEARCH: 30,
+    "Total": 180,
+}
+
 # Preferred summary order (sub-phases before coarse Visual Timeline bucket)
 SUMMARY_ORDER: tuple[str, ...] = (
     PHASE_SCRIPT_GENERATION,
@@ -47,6 +54,26 @@ def _utc_now() -> datetime:
 
 def _format_ts(dt: datetime) -> str:
     return dt.isoformat(timespec="milliseconds")
+
+
+def log_optimization_banner() -> None:
+    """Print/log active performance optimizations for before/after comparison."""
+    lines = [
+        "",
+        "Performance optimization sprint — active settings:",
+        "  • Metadata: 1 Ollama call (TITLE + DESCRIPTION + HASHTAGS)",
+        "  • Scene Agent: 1 Ollama call per attempt (max 2 attempts), truncated script prompt",
+        "  • Asset Search: parallel scenes, early-exit API search, 12 workers / 10 downloads",
+        "  • Thumbnail: reuses timeline assets or video frame (no new stock searches)",
+        "  Targets: Metadata <15s | Scenes <20s | Assets <30s | Total <180s",
+        "─" * 48,
+    ]
+    block = "\n".join(lines)
+    print(block, flush=True)
+    logger.info(
+        "Performance optimizations enabled",
+        extra={"event": "perf_optimization_sprint"},
+    )
 
 
 @dataclass(frozen=True)
@@ -190,6 +217,12 @@ class PipelineTimer:
             lines.append(f"    DURATION: {record.duration_seconds:.2f} sec")
         lines.append("─" * 40)
         lines.append(f"  TOTAL: {self.total:.1f} sec")
+        lines.append("")
+        lines.append("  Targets (optimization sprint):")
+        for label, target in OPTIMIZATION_TARGETS_SEC.items():
+            actual = self.total if label == "Total" else self.get(label)
+            status = "OK" if actual <= target else "OVER"
+            lines.append(f"    {label}: {actual:.1f}s / {target}s [{status}]")
         block = "\n".join(lines)
         print(block, flush=True)
 

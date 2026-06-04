@@ -5,6 +5,7 @@ import SplashScreen from './components/splash/SplashScreen'
 import AppShell from './components/layout/AppShell'
 import PageTransition from './components/layout/PageTransition'
 import { GenerationProvider } from './context/GenerationContext'
+import LandingPage from './pages/LandingPage'
 import HomePage from './pages/HomePage'
 import ProcessingPage from './pages/ProcessingPage'
 import ResultPage from './pages/ResultPage'
@@ -17,6 +18,14 @@ function AnimatedRoutes() {
       <Routes location={location} key={location.pathname}>
         <Route
           path="/"
+          element={
+            <PageTransition>
+              <LandingPage />
+            </PageTransition>
+          }
+        />
+        <Route
+          path="/create"
           element={
             <PageTransition>
               <HomePage />

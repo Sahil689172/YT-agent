@@ -98,6 +98,9 @@ def main() -> int:
         return 1
 
     timer = PipelineTimer()
+    from pipeline_timing import log_optimization_banner
+
+    log_optimization_banner()
     script_generator = ScriptGenerator()
     metadata_generator = MetadataGenerator()
     voice_generator = VoiceGenerator()

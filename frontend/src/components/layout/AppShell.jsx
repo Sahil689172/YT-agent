@@ -4,7 +4,12 @@ import { Home, Sparkles } from 'lucide-react'
 
 export default function AppShell({ children }) {
   const location = useLocation()
-  const isHome = location.pathname === '/'
+  const isFullscreen =
+    location.pathname === '/' || location.pathname === '/create'
+
+  if (isFullscreen) {
+    return <>{children}</>
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -24,15 +29,13 @@ export default function AppShell({ children }) {
             </span>
           </Link>
 
-          {!isHome && (
-            <Link
-              to="/"
-              className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-white/50 border border-white/10 hover:text-white/90 hover:border-white/20 transition-colors neo-inset"
-            >
-              <Home size={16} />
-              Home
-            </Link>
-          )}
+          <Link
+            to="/create"
+            className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-white/50 border border-white/10 hover:text-white/90 hover:border-white/20 transition-colors neo-inset"
+          >
+            <Home size={16} />
+            Create
+          </Link>
         </div>
       </motion.header>
 

@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +31,9 @@ MIN_SCENE_DURATION = 3
 MAX_SCENE_DURATION = 8
 DURATION_TOLERANCE_RATIO = 0.15
 WORDS_PER_SECOND_ESTIMATE = 2.5
-PROGRESS_STEPS = 5
-MAX_GENERATION_ATTEMPTS = 3
+PROGRESS_STEPS = 4
+MAX_GENERATION_ATTEMPTS = 2
+MAX_SCRIPT_CHARS_IN_PROMPT = 4000
 SCENE_OBJECT_KEYS = ("scene_number", "duration_seconds", "title", "visual_description")
 
 SYSTEM_PROMPT = """You are a visual director for YouTube Shorts.
@@ -347,13 +349,10 @@ class SceneAgent:
         self._print_progress(2, "Analyzing content...")
         self._analyze_duration()
 
-        self._print_progress(3, "Generating scenes...")
+        self._print_progress(3, "Generating scenes (single Ollama call)...")
         scenes = self._generate_scenes()
 
-        self._print_progress(4, "Validating JSON...")
-        scenes = self._validate_and_normalize(scenes)
-
-        self._print_progress(5, "Saving scenes...")
+        self._print_progress(4, "Saving scenes...")
         path = self._save(scenes)
         self._print_scene_summary(scenes)
         return scenes, path
@@ -418,9 +417,21 @@ class SceneAgent:
             flush=True,
         )
 
+    @staticmethod
+    def _script_for_prompt(script: str, max_chars: int = MAX_SCRIPT_CHARS_IN_PROMPT) -> str:
+        if len(script) <= max_chars:
+            return script
+        logger.info(
+            "Scene prompt: using first %d chars of script (%d total)",
+            max_chars,
+            len(script),
+        )
+        return script[:max_chars].rsplit(" ", 1)[0] + "…"
+
     def _generate_scenes(self) -> list[dict[str, Any]]:
+        started = time.perf_counter()
         prompt = USER_PROMPT_TEMPLATE.format(
-            script=self._script_text,
+            script=self._script_for_prompt(self._script_text),
             target_duration=self._target_duration,
             target_visuals=self.target_visual_count,
             seconds_per_visual=SECONDS_PER_VISUAL,
@@ -443,12 +454,13 @@ class SceneAgent:
             try:
                 parsed = parse_scenes_json(raw)
                 scenes = self._validate_and_normalize(parsed)
-                if attempt > 1:
-                    logger.info(
-                        "Scenes generated successfully on attempt %d (%d scenes)",
-                        attempt,
-                        len(scenes),
-                    )
+                elapsed = time.perf_counter() - started
+                logger.info(
+                    "Scenes generated in one Ollama call (%.2f sec, %d scenes, attempt %d)",
+                    elapsed,
+                    len(scenes),
+                    attempt,
+                )
                 return scenes
             except SceneValidationError as exc:
                 last_error = exc
@@ -546,6 +558,7 @@ class SceneAgent:
         }
         if json_mode:
             chat_kwargs["format"] = "json"
+            chat_kwargs["options"] = {"num_predict": 2800, "temperature": 0.3}
 
         try:
             response = ollama.chat(**chat_kwargs)
