@@ -88,6 +88,10 @@ Desktop.ini
 jobs/*/
 !jobs/.gitkeep
 
+# Topic-level asset cache (per-topic folders; keep structure only)
+assets/cache/topics/*/
+!assets/cache/topics/.gitkeep
+
 # Future Secrets
 
 client_secret.json

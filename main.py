@@ -66,6 +66,15 @@ from voice_generator import (
     VoiceGeneratorError,
     VoiceModelNotFoundError,
 )
+from pipeline_timing import (
+    PHASE_CAPTIONS,
+    PHASE_METADATA,
+    PHASE_SCENES,
+    PHASE_SCRIPT_GENERATION,
+    PHASE_THUMBNAIL,
+    PHASE_VOICE,
+    PipelineTimer,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -88,17 +97,19 @@ def main() -> int:
         print("Error: Topic cannot be empty.", file=sys.stderr)
         return 1
 
+    timer = PipelineTimer()
     script_generator = ScriptGenerator()
     metadata_generator = MetadataGenerator()
     voice_generator = VoiceGenerator()
     caption_generator = CaptionGenerator()
     scene_agent = SceneAgent()
-    visual_timeline_agent = VisualTimelineAgent()
-    thumbnail_agent = ThumbnailAgent()
+    visual_timeline_agent = VisualTimelineAgent(topic=topic, timer=timer)
+    thumbnail_agent = ThumbnailAgent(topic=topic)
 
     try:
-        logger.info("Phase 1: generating script")
-        script, raw_path, formatted_path = script_generator.generate_and_save(topic)
+        with timer.track(PHASE_SCRIPT_GENERATION):
+            logger.info("Phase 1: generating script")
+            script, raw_path, formatted_path = script_generator.generate_and_save(topic)
     except OllamaConnectionError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -122,10 +133,11 @@ def main() -> int:
     print(f"  Debug:    {raw_path}")
 
     try:
-        logger.info("Phase 1: generating metadata")
-        metadata, title_path, description_path, hashtags_path = (
-            metadata_generator.generate_and_save(script, topic)
-        )
+        with timer.track(PHASE_METADATA):
+            logger.info("Phase 1: generating metadata")
+            metadata, title_path, description_path, hashtags_path = (
+                metadata_generator.generate_and_save(script, topic)
+            )
     except MetadataOllamaConnectionError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -147,9 +159,10 @@ def main() -> int:
     print(f"  Title preview: {metadata.title}")
 
     try:
-        logger.info("Phase 2: generating voice narration")
-        print("\nPhase 2 — Voice generation")
-        audio_path = voice_generator.generate()
+        with timer.track(PHASE_VOICE):
+            logger.info("Phase 2: generating voice narration")
+            print("\nPhase 2 — Voice generation")
+            audio_path = voice_generator.generate()
     except PiperNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -169,9 +182,10 @@ def main() -> int:
     print(f"\nVoice saved -> {audio_path}")
 
     try:
-        logger.info("Phase 3: generating captions")
-        print("\nPhase 3 — Caption generation")
-        srt_path = caption_generator.generate()
+        with timer.track(PHASE_CAPTIONS):
+            logger.info("Phase 3: generating captions")
+            print("\nPhase 3 — Caption generation")
+            srt_path = caption_generator.generate()
     except AudioNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -194,9 +208,10 @@ def main() -> int:
     print(f"\nCaptions saved -> {srt_path}")
 
     try:
-        logger.info("Phase 4.5A: generating visual scenes")
-        print("\nPhase 4.5A — Scene Agent")
-        _, scenes_path = scene_agent.generate()
+        with timer.track(PHASE_SCENES):
+            logger.info("Phase 4.5A: generating visual scenes")
+            print("\nPhase 4.5A — Scene Agent")
+            _, scenes_path = scene_agent.generate()
     except SceneScriptNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -255,9 +270,10 @@ def main() -> int:
     )
 
     try:
-        logger.info("Phase 5: generating YouTube thumbnail")
-        print("\nPhase 5 — Thumbnail Agent")
-        thumb = thumbnail_agent.generate()
+        with timer.track(PHASE_THUMBNAIL):
+            logger.info("Phase 5: generating YouTube thumbnail")
+            print("\nPhase 5 — Thumbnail Agent")
+            thumb = thumbnail_agent.generate()
     except TitleNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -275,6 +291,7 @@ def main() -> int:
         return 1
 
     print(f"\nThumbnail saved -> {thumb.output_path}")
+    timer.log_summary()
     return 0
 
 

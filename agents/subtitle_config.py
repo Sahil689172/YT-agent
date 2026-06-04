@@ -75,6 +75,15 @@ def subtitle_max_words() -> int:
     return max(subtitle_min_words(), _env_int("SUBTITLE_MAX_WORDS", DEFAULT_MAX_WORDS))
 
 
+def subtitle_word_range_note() -> str:
+    """Short label for logs/UI (e.g. '3-6 words per block')."""
+    lo = subtitle_min_words()
+    hi = subtitle_max_words()
+    if lo == hi:
+        return f"{lo} words per block"
+    return f"{lo}-{hi} words per block"
+
+
 def subtitle_horizontal_margin() -> int:
     """Side margins so text stays within 80% of frame width."""
     return int(VIDEO_WIDTH * (1 - MAX_WIDTH_RATIO) / 2)
@@ -211,11 +220,8 @@ def _pack_word_count(remaining: int, min_words: int, max_words: int, target: int
     return max(min_words, min(max_words, target))
 
 
-def segment_captions_for_shorts(result: dict) -> list[SubtitleCue]:
-    """
-    Split Whisper output into short, mobile-friendly cues (3–6 words, max 2 lines).
-    """
-    words = _collect_words(result)
+def _segment_words_to_cues(words: list[dict[str, float | str]]) -> list[SubtitleCue]:
+    """Pack timed words into Shorts-style SRT cues."""
     if not words:
         return []
 
@@ -245,6 +251,35 @@ def segment_captions_for_shorts(result: dict) -> list[SubtitleCue]:
         cues.append(SubtitleCue(start=start, end=end, text=text))
 
     return _merge_tiny_gaps(cues)
+
+
+def segment_captions_for_shorts(result: dict) -> list[SubtitleCue]:
+    """
+    Split Whisper output into short, mobile-friendly cues (3–6 words, max 2 lines).
+    """
+    return _segment_words_to_cues(_collect_words(result))
+
+
+def segment_captions_from_script(script: str, total_duration: float) -> list[SubtitleCue]:
+    """
+    Build caption cues directly from the narration script (skip Whisper).
+
+    Word timings are distributed proportionally across the narration duration.
+    """
+    tokens = [w for w in script.split() if w.strip()]
+    if not tokens or total_duration <= 0:
+        return []
+
+    n = len(tokens)
+    words: list[dict[str, float | str]] = []
+    for index, token in enumerate(tokens):
+        start = (index / n) * total_duration
+        end = ((index + 1) / n) * total_duration
+        if end <= start:
+            end = start + 0.05
+        words.append({"word": token, "start": start, "end": end})
+
+    return _segment_words_to_cues(words)
 
 
 def _merge_tiny_gaps(cues: list[SubtitleCue], gap_threshold: float = 0.04) -> list[SubtitleCue]:

@@ -10,6 +10,7 @@ import {
   Download,
   Home,
   FileDown,
+  Timer,
 } from 'lucide-react'
 import FloatingPanel from '../components/ui/FloatingPanel'
 import NeoButton from '../components/ui/NeoButton'
@@ -17,6 +18,10 @@ import CopyButton from '../components/ui/CopyButton'
 import ErrorBanner from '../components/ui/ErrorBanner'
 import { useGeneration } from '../context/GenerationContext'
 import { assetUrl, parseHashtags } from '../lib/api'
+import {
+  buildPerformanceLines,
+  formatPerformanceForCopy,
+} from '../constants/phases'
 
 function MediaPlaceholder({ aspect, label, icon: Icon }) {
   return (
@@ -44,7 +49,8 @@ function downloadFile(url, filename) {
 
 export default function ResultPage() {
   const navigate = useNavigate()
-  const { result, jobId, clearJob, fetchAndStoreResult, error } = useGeneration()
+  const { result, progress, jobId, clearJob, fetchAndStoreResult, error } =
+    useGeneration()
 
   useEffect(() => {
     if (!jobId) {
@@ -74,6 +80,9 @@ export default function ResultPage() {
   const hashtagsCopy = hashtagList.map((t) => `#${t}`).join('\n')
 
   const metadataText = `${title}\n\n${description}\n\n${hashtagsCopy}`
+  const perfSource = result.phase_timings?.length ? result : progress
+  const performanceLines = buildPerformanceLines(perfSource)
+  const performanceCopyText = formatPerformanceForCopy(perfSource)
 
   return (
     <div className="space-y-8 md:space-y-10">
@@ -160,6 +169,35 @@ export default function ResultPage() {
             <CopyButton text={hashtagsCopy} label="Copy hashtags" />
           </div>
         </FloatingPanel>
+
+        {performanceLines.length > 0 && (
+          <FloatingPanel title="Performance" icon={Timer} delay={0.28} span="full">
+            <div className="space-y-3">
+              <div className="font-mono text-sm text-white/65 space-y-1">
+                {performanceLines.map((line) => (
+                  <p
+                    key={line}
+                    className={
+                      line.startsWith('TOTAL:')
+                        ? 'text-emerald-400/90 pt-2 border-t border-white/10'
+                        : ''
+                    }
+                  >
+                    {line}
+                  </p>
+                ))}
+              </div>
+              <CopyButton text={performanceCopyText} label="Copy timings" />
+              {jobId && (
+                <p className="text-xs text-white/30">
+                  Also saved as{' '}
+                  <span className="text-white/45">jobs/{jobId}/performance.txt</span>{' '}
+                  (if this run used the latest API).
+                </p>
+              )}
+            </div>
+          </FloatingPanel>
+        )}
 
         <FloatingPanel title="Downloads" icon={Download} delay={0.3} span="full">
           <div className="flex flex-col sm:flex-row flex-wrap gap-3">

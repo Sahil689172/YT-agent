@@ -7,8 +7,19 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from backend.job_manager import JobManager
+from backend.job_manager import JobManager, JobResult
 from backend.logging_config import phase_logger
+from pipeline_timing import (
+    PHASE_CAPTIONS,
+    PHASE_FINALIZATION,
+    PHASE_METADATA,
+    PHASE_SCENES,
+    PHASE_SCRIPT_GENERATION,
+    PHASE_SCRIPT_PREPARATION,
+    PHASE_THUMBNAIL,
+    PHASE_VOICE,
+    PipelineTimer,
+)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
@@ -31,48 +42,78 @@ def run_job(job_id: str, job_manager: JobManager) -> None:
 
     os.chdir(ROOT_DIR)
 
+    timer = PipelineTimer()
+
     if job.mode == "topic":
-        _run_topic_pipeline(job_id, job.topic, job_manager)
+        _run_topic_pipeline(job_id, job.topic, job_manager, timer)
     elif job.mode == "script":
-        _run_script_pipeline(job_id, job.script, job.topic, job_manager)
+        _run_script_pipeline(job_id, job.script, job.topic, job_manager, timer)
     else:
         raise PipelineError(f"Unknown job mode: {job.mode}", "Initialization")
 
+    job = job_manager.get(job_id)
+    if job:
+        job_manager.update_performance(job_id, timer)
+    timer.log_summary()
 
-def _run_topic_pipeline(job_id: str, topic: str, jm: JobManager) -> None:
+
+def _run_topic_pipeline(
+    job_id: str, topic: str, jm: JobManager, timer: PipelineTimer
+) -> None:
     from script_generator import ScriptGenerator
 
     phases = jm.get(job_id).phases  # type: ignore[union-attr]
     script_generator = ScriptGenerator()
-    script = ""
     completed = 0
 
-    def step(phase: str, fn: Callable[[], None]) -> None:
+    def step(phase: str, label: str, fn: Callable[[], None], track: bool = True) -> None:
         nonlocal completed
         jm.start_phase(job_id, phase, completed)
         log = phase_logger(__name__, job_id, phase)
-        log.info("Started", extra={"event": "started"})
+        log.info("Started", extra={"event": "started", "perf_label": label})
         try:
-            fn()
+            if track:
+                with timer.track(label):
+                    fn()
+            else:
+                fn()
         except Exception as exc:
             log.error("Failed", extra={"event": "failed", "error": str(exc)})
             raise PipelineError(str(exc), phase) from exc
         completed += 1
         jm.complete_phase(job_id, completed)
-        log.info("Completed", extra={"event": "completed"})
+        jm.update_performance(job_id, timer)
+        log.info("Completed", extra={"event": "completed", "perf_label": label})
 
-    step(phases[0], lambda: _phase_script_topic(script_generator, topic))
+    step(
+        phases[0],
+        PHASE_SCRIPT_GENERATION,
+        lambda: _phase_script_topic(script_generator, topic),
+    )
     script = _read_script()
 
-    step(phases[1], lambda: _phase_metadata(script, topic))
-    step(phases[2], lambda: _phase_voice())
-    step(phases[3], lambda: _phase_captions())
-    step(phases[4], lambda: _phase_scenes())
-    step(phases[5], lambda: _phase_visual_timeline())
-    step(phases[6], lambda: _phase_thumbnail())
-    step(phases[7], lambda: None)  # Finalization marker
+    step(phases[1], PHASE_METADATA, lambda: _phase_metadata(script, topic))
+    step(phases[2], PHASE_VOICE, _phase_voice)
+    step(phases[3], PHASE_CAPTIONS, _phase_captions)
+    step(phases[4], PHASE_SCENES, _phase_scenes)
+    step(
+        phases[5],
+        phases[5],
+        lambda: _phase_visual_timeline(job_id, topic, timer, jm),
+        track=False,
+    )
+    step(phases[6], PHASE_THUMBNAIL, lambda: _phase_thumbnail(topic))
 
-    result = jm.finalize_artifacts(job_id)
+    result: JobResult | None = None
+
+    def _finalize() -> None:
+        nonlocal result
+        result = jm.finalize_artifacts(job_id)
+
+    step(phases[7], PHASE_FINALIZATION, _finalize)
+    if result is None:
+        raise PipelineError("Finalization did not produce a result.", "Finalization")
+    jm.update_performance(job_id, timer)
     jm.complete(job_id, result)
     logger.info(
         "Job completed",
@@ -80,39 +121,63 @@ def _run_topic_pipeline(job_id: str, topic: str, jm: JobManager) -> None:
     )
 
 
-def _run_script_pipeline(job_id: str, script_text: str, topic: str, jm: JobManager) -> None:
+def _run_script_pipeline(
+    job_id: str, script_text: str, topic: str, jm: JobManager, timer: PipelineTimer
+) -> None:
     from script_generator import ScriptGenerator
 
     phases = jm.get(job_id).phases  # type: ignore[union-attr]
     script_generator = ScriptGenerator()
     completed = 0
 
-    def step(phase: str, fn: Callable[[], None]) -> None:
+    def step(phase: str, label: str, fn: Callable[[], None], track: bool = True) -> None:
         nonlocal completed
         jm.start_phase(job_id, phase, completed)
         log = phase_logger(__name__, job_id, phase)
-        log.info("Started", extra={"event": "started"})
+        log.info("Started", extra={"event": "started", "perf_label": label})
         try:
-            fn()
+            if track:
+                with timer.track(label):
+                    fn()
+            else:
+                fn()
         except Exception as exc:
             log.error("Failed", extra={"event": "failed", "error": str(exc)})
             raise PipelineError(str(exc), phase) from exc
         completed += 1
         jm.complete_phase(job_id, completed)
-        log.info("Completed", extra={"event": "completed"})
+        jm.update_performance(job_id, timer)
+        log.info("Completed", extra={"event": "completed", "perf_label": label})
 
-    step(phases[0], lambda: _phase_script_custom(script_generator, script_text))
+    step(
+        phases[0],
+        PHASE_SCRIPT_PREPARATION,
+        lambda: _phase_script_custom(script_generator, script_text),
+    )
     script = _read_script()
 
-    step(phases[1], lambda: _phase_metadata(script, topic))
-    step(phases[2], lambda: _phase_voice())
-    step(phases[3], lambda: _phase_captions())
-    step(phases[4], lambda: _phase_scenes())
-    step(phases[5], lambda: _phase_visual_timeline())
-    step(phases[6], lambda: _phase_thumbnail())
-    step(phases[7], lambda: None)
+    step(phases[1], PHASE_METADATA, lambda: _phase_metadata(script, topic))
+    step(phases[2], PHASE_VOICE, _phase_voice)
+    step(phases[3], PHASE_CAPTIONS, _phase_captions)
+    step(phases[4], PHASE_SCENES, _phase_scenes)
+    step(
+        phases[5],
+        phases[5],
+        lambda: _phase_visual_timeline(job_id, topic, timer, jm),
+        track=False,
+    )
+    step(phases[6], PHASE_THUMBNAIL, lambda: _phase_thumbnail(topic))
 
-    result = jm.finalize_artifacts(job_id)
+    result: JobResult | None = None
+
+    def _finalize() -> None:
+        nonlocal result
+        result = jm.finalize_artifacts(job_id)
+
+    step(phases[7], PHASE_FINALIZATION, _finalize)
+    if result is None:
+        raise PipelineError("Finalization did not produce a result.", "Finalization")
+    jm.update_performance(job_id, timer)
     jm.complete(job_id, result)
     logger.info(
         "Job completed",
@@ -254,7 +319,12 @@ def _phase_scenes() -> None:
         raise PipelineError(str(exc), "Scene Generation") from exc
 
 
-def _phase_visual_timeline() -> None:
+def _phase_visual_timeline(
+    job_id: str,
+    topic: str,
+    timer: PipelineTimer,
+    jm: JobManager,
+) -> None:
     from agents.visual_asset_agent import APIKeyMissingError
     from agents.visual_timeline_agent import (
         CaptionsNotFoundError as TimelineCaptionsNotFoundError,
@@ -267,7 +337,14 @@ def _phase_visual_timeline() -> None:
         VisualTimelineAgentError,
     )
 
-    visual_timeline_agent = VisualTimelineAgent()
+    def sync_timings() -> None:
+        jm.update_performance(job_id, timer)
+
+    visual_timeline_agent = VisualTimelineAgent(
+        topic=topic,
+        timer=timer,
+        on_timing_sync=sync_timings,
+    )
     try:
         visual_timeline_agent.generate()
     except TimelineScenesNotFoundError as exc:
@@ -288,7 +365,7 @@ def _phase_visual_timeline() -> None:
         raise PipelineError(str(exc), "Visual Timeline") from exc
 
 
-def _phase_thumbnail() -> None:
+def _phase_thumbnail(topic: str) -> None:
     from agents.thumbnail_agent import (
         FFmpegNotFoundError as ThumbnailFFmpegNotFoundError,
         ThumbnailAgent,
@@ -298,7 +375,7 @@ def _phase_thumbnail() -> None:
         VisualSourceNotFoundError,
     )
 
-    thumbnail_agent = ThumbnailAgent()
+    thumbnail_agent = ThumbnailAgent(topic=topic)
     try:
         thumbnail_agent.generate()
     except TitleNotFoundError as exc:
@@ -334,4 +411,10 @@ def pipeline_worker(job_id: str, job_manager: JobManager) -> None:
                 "phase": exc.phase,
                 "error": str(exc),
             },
+        )
+    except Exception as exc:
+        job_manager.fail(job_id, str(exc))
+        logger.exception(
+            "Job failed with unexpected error",
+            extra={"job_id": job_id, "event": "job_failed"},
         )

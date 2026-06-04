@@ -260,6 +260,67 @@ Bold title text is overlaid on every path. Output is always **1280×720** PNG.
 
 ---
 
+## Performance optimizations
+
+AutoShorts is tuned for **faster runs without lowering output quality**.
+
+### Pipeline profiling
+
+Every phase records **START**, **END**, and **DURATION** (UTC timestamps). A compact summary is printed at the end, for example:
+
+```text
+Script Generation: 4.2 sec
+Metadata Generation: 1.1 sec
+Voice Generation: 18.4 sec
+Caption Generation: 0.9 sec
+Scene Agent: 2.3 sec
+Asset Search: 14.2 sec
+Video Rendering: 31.7 sec
+Thumbnail Generation: 5.1 sec
+TOTAL: 77.9 sec
+```
+
+Timings appear in the **CLI terminal**, **FastAPI JSON logs** (`PERF` lines), and the **frontend processing screen** (`/progress/{job_id}` → `phase_timings`).
+
+### Parallel asset search
+
+- **Visual timeline:** All scenes search in parallel; within each scene, Pexels video, Pexels image, and Pixabay run **at the same time** (same source priority as before).
+- **Downloads:** Scene asset downloads run in parallel.
+- **Thumbnail:** Pexels and Pixabay stock searches run **at the same time** when a video frame is not used.
+
+### Faster captions (script-first)
+
+When `scripts/script.txt` exists after voice generation:
+
+```text
+Script → timed cues → SRT   (Whisper skipped)
+```
+
+Whisper runs only if the script is missing or `CAPTIONS_USE_WHISPER=1` is set. Same Shorts-style segmentation rules apply.
+
+### Topic asset cache
+
+Re-running the **same topic** reuses:
+
+- Downloaded timeline scene files (`assets/cache/topics/{hash}/`)
+- API search results (24h file cache under `assets/cache/`)
+- Cached thumbnail when available
+
+### FFmpeg efficiency
+
+- Segment concat uses **stream copy** (`-c copy`) instead of re-encoding each join.
+- Segment encodes use `libx264 -preset fast`.
+- Final burn-in pass uses `-preset fast` (subtitles still require one encode).
+
+### Environment toggles
+
+| Variable | Effect |
+|----------|--------|
+| `CAPTIONS_USE_WHISPER=1` | Force Whisper even when script exists |
+| `FFMPEG_EXECUTABLE` | Custom FFmpeg path |
+
+---
+
 ## Project Structure
 
 ```text
@@ -270,10 +331,12 @@ YT-agent/
 │   ├── thumbnail_agent.py
 │   ├── subtitle_config.py
 │   ├── visual_asset_agent.py       # legacy image-only path
+│   ├── topic_cache.py              # per-topic asset reuse
 │   └── timeline_video_builder.py   # legacy slideshow path
 ├── assets/
 │   ├── backgrounds/
 │   ├── cache/
+│   │   └── topics/                 # topic-hash scene + thumbnail cache
 │   ├── clips/
 │   ├── scenes/
 │   └── timeline/
@@ -285,6 +348,7 @@ YT-agent/
 ├── videos/
 ├── models/piper/
 ├── main.py                         # AI Mode — full pipeline
+├── pipeline_timing.py              # per-phase profiling + summary logs
 ├── script_generator.py
 ├── metadata_generator.py
 ├── voice_generator.py

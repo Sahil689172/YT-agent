@@ -1,4 +1,4 @@
-"""Phase 3: Generate subtitles from narration audio using OpenAI Whisper (local)."""
+"""Phase 3: Generate subtitles from script (fast) or Whisper (fallback)."""
 
 from __future__ import annotations
 
@@ -11,20 +11,17 @@ from pathlib import Path
 
 from agents.subtitle_config import (
     log_subtitle_settings,
+    segment_captions_from_script,
     segment_captions_for_shorts,
-    subtitle_max_words,
-    subtitle_min_words,
+    subtitle_word_range_note,
     write_shorts_srt,
 )
-
-
-def subtitle_word_range_note() -> str:
-    return f"{subtitle_min_words()}-{subtitle_max_words()} words per block"
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_FFMPEG = "ffmpeg"
 WHISPER_MODEL_NAME = "base.en"
+SCRIPT_PATH = Path("scripts/script.txt")
 AUDIO_PATH = Path("audio/output.wav")
 OUTPUT_SRT = Path("captions/output.srt")
 PROGRESS_STEPS = 6
@@ -51,7 +48,7 @@ class WhisperModelLoadError(CaptionGeneratorError):
 
 
 class CaptionGenerationError(CaptionGeneratorError):
-    """Whisper transcription or SRT writing failed."""
+    """Transcription or SRT writing failed."""
 
 
 def resolve_ffmpeg(ffmpeg: str | None = None) -> str:
@@ -86,29 +83,94 @@ def _import_whisper():
     return whisper, get_writer
 
 
+def _force_whisper() -> bool:
+    return os.environ.get("CAPTIONS_USE_WHISPER", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 class CaptionGenerator:
-    """Generate SRT captions from audio/output.wav via local OpenAI Whisper."""
+    """Generate SRT captions from script text (default) or Whisper (fallback)."""
 
     def __init__(
         self,
         ffmpeg: str | None = None,
         audio_path: Path | str = AUDIO_PATH,
+        script_path: Path | str = SCRIPT_PATH,
         output_path: Path | str = OUTPUT_SRT,
         whisper_model: str = WHISPER_MODEL_NAME,
         language: str = "en",
     ) -> None:
         self.ffmpeg = resolve_ffmpeg(ffmpeg)
         self.audio_path = Path(audio_path)
+        self.script_path = Path(script_path)
         self.output_path = Path(output_path)
         self.whisper_model_name = whisper_model
         self.language = language
         self._whisper_model = None
 
     def generate(self) -> Path:
-        """Transcribe narration audio and write captions/output.srt."""
+        """Write captions/output.srt using script timing or Whisper."""
         self._print_progress(1, "Verifying narration audio...")
         self._verify_audio()
 
+        if not _force_whisper() and self._try_script_captions():
+            self._print_progress(6, "Verifying output.srt...")
+            self._verify_output()
+            logger.info("Captions saved to %s (script-based)", self.output_path.resolve())
+            return self.output_path.resolve()
+
+        logger.info("Using Whisper transcription (script unavailable or forced)")
+        return self._generate_with_whisper()
+
+    def _try_script_captions(self) -> bool:
+        if not self.script_path.is_file():
+            logger.info("No script at %s; Whisper required", self.script_path)
+            return False
+
+        script = self.script_path.read_text(encoding="utf-8").strip()
+        if not script:
+            logger.info("Script file empty; Whisper required")
+            return False
+
+        self._print_progress(2, "Building captions from script (skipping Whisper)...")
+        duration = self._probe_audio_duration()
+        log_subtitle_settings()
+        cues = segment_captions_from_script(script, duration)
+        if not cues:
+            logger.warning("Script produced no cues; falling back to Whisper")
+            return False
+
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.output_path.exists():
+            self.output_path.unlink()
+        write_shorts_srt(cues, self.output_path)
+        print(
+            f"  Direct SRT from script: {len(cues)} blocks "
+            f"({subtitle_word_range_note()}) — Whisper skipped",
+            flush=True,
+        )
+        logger.info(
+            "Script-based captions: %d cues, %.2fs audio",
+            len(cues),
+            duration,
+        )
+        return True
+
+    def _probe_audio_duration(self) -> float:
+        try:
+            from agents.timeline_video_builder import probe_duration, resolve_ffmpeg_tool
+
+            ffprobe = resolve_ffmpeg_tool("ffprobe", "FFPROBE_EXECUTABLE")
+            return probe_duration(self.audio_path, ffprobe)
+        except Exception as exc:
+            logger.warning("ffprobe failed (%s); estimating from word count", exc)
+            script = self.script_path.read_text(encoding="utf-8")
+            return max(30.0, len(script.split()) * 0.35)
+
+    def _generate_with_whisper(self) -> Path:
         self._print_progress(2, "Verifying FFmpeg...")
         self._verify_ffmpeg()
 
@@ -119,12 +181,12 @@ class CaptionGenerator:
         result = self._transcribe(model)
 
         self._print_progress(5, "Segmenting and writing Shorts-style captions...")
-        self._write_srt(result)
+        self._write_srt_from_whisper(result)
 
         self._print_progress(6, "Verifying output.srt...")
         self._verify_output()
 
-        logger.info("Captions saved to %s", self.output_path.resolve())
+        logger.info("Captions saved to %s (Whisper)", self.output_path.resolve())
         return self.output_path.resolve()
 
     def _print_progress(self, step: int, message: str) -> None:
@@ -195,7 +257,7 @@ class CaptionGenerator:
         logger.info("Transcription complete (%d segments)", segment_count)
         return result
 
-    def _write_srt(self, result: dict) -> None:
+    def _write_srt_from_whisper(self, result: dict) -> None:
         log_subtitle_settings()
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         if self.output_path.exists():
@@ -208,12 +270,7 @@ class CaptionGenerator:
                 "Check audio quality and Whisper output."
             )
 
-        try:
-            write_shorts_srt(cues, self.output_path)
-        except OSError as exc:
-            logger.error("Failed to write SRT: %s", exc)
-            raise CaptionGenerationError(f"Failed to write SRT file: {exc}") from exc
-
+        write_shorts_srt(cues, self.output_path)
         logger.info("SRT file written: %s (%d cues)", self.output_path, len(cues))
         print(
             f"  Shorts captions: {len(cues)} blocks "

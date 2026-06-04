@@ -9,12 +9,14 @@ import re
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
 import ollama
 import requests
 
+from agents.topic_cache import TopicAssetCache
 from agents.visual_asset_agent import (
     ImageCandidate,
     PexelsClient,
@@ -194,6 +196,7 @@ class ThumbnailAgent:
         video_path: Path | str = VIDEO_PATH,
         pexels_client: PexelsClient | None = None,
         pixabay_client: PixabayClient | None = None,
+        topic: str | None = None,
     ) -> None:
         self.model = model
         self.title_path = Path(title_path)
@@ -205,6 +208,8 @@ class ThumbnailAgent:
         cache = SearchCache()
         self.pexels = pexels_client or PexelsClient(cache=cache)
         self.pixabay = pixabay_client or PixabayClient(cache=cache)
+        self.topic = (topic or "").strip()
+        self.topic_cache = TopicAssetCache(self.topic) if self.topic else None
         self._title = ""
         self._text = ThumbnailText("", "")
         self._background_path: Path | None = None
@@ -221,25 +226,35 @@ class ThumbnailAgent:
         self._text = self._generate_thumbnail_text(self._title)
         logger.info("Thumbnail text: %s / %s", self._text.line1, self._text.line2)
 
-        self._print_progress(2, "Analyzing video & selecting visual...")
-        self._background_path, self._source_type, self._frame_score = self._select_visual()
+        if self.topic_cache and self.topic_cache.try_restore_thumbnail(self.output_path):
+            self._source_type = "Topic Cache"
+            self._background_path = self.output_path
+            self._frame_score = None
+            logger.info("Thumbnail Source: Topic Cache (reused)")
+            print("  Thumbnail Source: Topic Cache (reused)", flush=True)
+        else:
+            self._print_progress(2, "Analyzing video & selecting visual...")
+            self._background_path, self._source_type, self._frame_score = self._select_visual()
         logger.info("Thumbnail Source: %s", self._source_type)
         logger.info("Background file: %s", self._background_path)
         if self._frame_score is not None:
             logger.info("Best frame score: %.3f", self._frame_score)
 
-        self._print_progress(3, "Creating layout...")
-        canvas = self._build_canvas(self._background_path)
-
-        self._print_progress(4, "Rendering text...")
-        composed = self._render_text(canvas, self._text)
-
-        self._print_progress(5, "Saving thumbnail...")
-        self._save_thumbnail(composed)
+        if self._source_type != "Topic Cache":
+            self._print_progress(3, "Creating layout...")
+            canvas = self._build_canvas(self._background_path)
+            self._print_progress(4, "Rendering text...")
+            composed = self._render_text(canvas, self._text)
+            self._print_progress(5, "Saving thumbnail...")
+            self._save_thumbnail(composed)
+        else:
+            self._print_progress(3, "Using cached thumbnail (skipped render)")
 
         self._print_progress(6, "Completed")
         self._verify_output()
         self._cleanup_frame_temp_dir()
+        if self.topic_cache and self._source_type != "Topic Cache":
+            self.topic_cache.save_thumbnail(self.output_path)
         result = ThumbnailResult(
             output_path=self.output_path.resolve(),
             title=self._title,
@@ -383,13 +398,9 @@ class ThumbnailAgent:
             )
 
         query = self._thumbnail_search_query()
-        pexels_path = self._fetch_stock_image(self.pexels, query, SOURCE_PEXELS, "landscape")
+        pexels_path, pixabay_path = self._fetch_stock_images_parallel(query)
         if pexels_path:
             return pexels_path, SOURCE_PEXELS, None
-
-        pixabay_path = self._fetch_stock_image(
-            self.pixabay, query, SOURCE_PIXABAY, "horizontal"
-        )
         if pixabay_path:
             return pixabay_path, SOURCE_PIXABAY, None
 
@@ -503,7 +514,7 @@ class ThumbnailAgent:
         Score frame quality: clarity, brightness, visual appeal, subject visibility.
         Returns 0.0–1.0 (higher is better).
         """
-        Image, ImageStat, _ = _require_pillow()
+        Image, _, _, ImageStat = _require_pillow()
         try:
             with Image.open(frame_path) as img:
                 rgb = img.convert("RGB")
@@ -544,6 +555,41 @@ class ThumbnailAgent:
         except OSError as exc:
             logger.debug("Frame score failed for %s: %s", frame_path, exc)
             return 0.0
+
+    def _fetch_stock_images_parallel(
+        self, query: str
+    ) -> tuple[Path | None, Path | None]:
+        """Search Pexels and Pixabay concurrently for thumbnail stock."""
+        pexels_result: Path | None = None
+        pixabay_result: Path | None = None
+
+        def search_pexels() -> Path | None:
+            return self._fetch_stock_image(
+                self.pexels, query, SOURCE_PEXELS, "landscape"
+            )
+
+        def search_pixabay() -> Path | None:
+            return self._fetch_stock_image(
+                self.pixabay, query, SOURCE_PIXABAY, "horizontal"
+            )
+
+        futures = {}
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            if self.pexels.api_key:
+                futures[executor.submit(search_pexels)] = SOURCE_PEXELS
+            if self.pixabay.api_key:
+                futures[executor.submit(search_pixabay)] = SOURCE_PIXABAY
+            for future in as_completed(futures):
+                label = futures[future]
+                try:
+                    path = future.result()
+                    if label == SOURCE_PEXELS:
+                        pexels_result = path
+                    else:
+                        pixabay_result = path
+                except Exception as exc:
+                    logger.warning("%s parallel search failed: %s", label, exc)
+        return pexels_result, pixabay_result
 
     def _fetch_stock_image(
         self,
@@ -597,7 +643,7 @@ class ThumbnailAgent:
             logger.warning("%s download failed: %s", label, exc)
             return None
 
-        Image, _, _ = _require_pillow()
+        Image, _, _, _ = _require_pillow()
         try:
             with Image.open(dest) as img:
                 if img.size[0] < 640 or img.size[1] < 360:
@@ -609,7 +655,7 @@ class ThumbnailAgent:
 
     def _generate_ai_fallback_background(self) -> Path:
         """Last resort: clean composed 1280×720 background (logged as AI)."""
-        Image, ImageDraw, _ = _require_pillow()
+        Image, ImageDraw, _, _ = _require_pillow()
         temp_dir = Path(tempfile.mkdtemp(prefix="yt_thumb_ai_"))
         path = temp_dir / "ai_background.png"
 
@@ -634,7 +680,7 @@ class ThumbnailAgent:
 
     def _accent_color_from_timeline(self) -> tuple[int, int, int]:
         """Sample average color from timeline assets to stay on-brand with the video."""
-        Image, ImageStat, _ = _require_pillow()
+        Image, _, _, ImageStat = _require_pillow()
         if not self.timeline_dir.is_dir():
             return (22, 22, 26)
 
@@ -657,7 +703,7 @@ class ThumbnailAgent:
         self._frame_temp_dir = None
 
     def _build_canvas(self, source: Path) -> object:
-        Image, _, _ = _require_pillow()
+        Image, _, _, _ = _require_pillow()
         try:
             with Image.open(source) as img:
                 rgb = img.convert("RGB")
@@ -667,7 +713,7 @@ class ThumbnailAgent:
 
     @staticmethod
     def _fit_cover(img: object, width: int, height: int) -> object:
-        Image, _, _ = _require_pillow()
+        Image, _, _, _ = _require_pillow()
         src_w, src_h = img.size
         scale = max(width / src_w, height / src_h)
         resized = img.resize(
@@ -774,7 +820,7 @@ class ThumbnailAgent:
         if size == 0:
             raise ThumbnailRenderError(f"Thumbnail file is empty: {self.output_path}")
 
-        Image, _, _ = _require_pillow()
+        Image, _, _, _ = _require_pillow()
         with Image.open(self.output_path) as img:
             dimensions = img.size
             if dimensions != (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT):

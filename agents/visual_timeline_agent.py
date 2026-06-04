@@ -12,11 +12,14 @@ import shutil
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import requests
+
+from agents.topic_cache import TopicAssetCache
 
 from agents.subtitle_config import build_subtitle_force_style
 from agents.timeline_video_builder import (
@@ -262,10 +265,10 @@ class PexelsVideoClient:
             duration = float(video.get("duration") or 0)
             if duration < MIN_VIDEO_DURATION:
                 continue
-            best = self._best_video_file(video.get("video_files") or [])
-            if best is None:
+            resolved = self._best_video_file(video.get("video_files") or [])
+            if resolved is None:
                 continue
-            url, width, height = best
+            url, width, height = resolved[0], resolved[1], resolved[2]
             if width < MIN_VIDEO_WIDTH or height < MIN_VIDEO_HEIGHT:
                 continue
             user = video.get("user") or {}
@@ -344,6 +347,11 @@ class VisualTimelineAgent:
         pexels_video: PexelsVideoClient | None = None,
         pexels_images: PexelsClient | None = None,
         pixabay: PixabayClient | None = None,
+        topic: str | None = None,
+        timer: Any | None = None,
+        on_timing_sync: Any | None = None,
+        max_search_workers: int = 8,
+        max_download_workers: int = 6,
     ) -> None:
         self.scenes_path = Path(scenes_path)
         self.assets_dir = Path(assets_dir)
@@ -357,9 +365,17 @@ class VisualTimelineAgent:
         self.pexels_video = pexels_video or PexelsVideoClient(cache=self.search_cache)
         self.pexels_images = pexels_images or PexelsClient(cache=self.search_cache)
         self.pixabay = pixabay or PixabayClient(cache=self.search_cache)
+        self.topic = (topic or "").strip()
+        self.topic_cache = TopicAssetCache(self.topic) if self.topic else None
+        self._timer = timer
+        self._on_timing_sync = on_timing_sync
+        self.max_search_workers = max(1, max_search_workers)
+        self.max_download_workers = max(1, max_download_workers)
         self._scenes: list[SceneRecord] = []
         self._narration_seconds = 0.0
         self._temp_dir: Path | None = None
+        self._asset_search_seconds = 0.0
+        self._video_render_seconds = 0.0
 
     def generate(self) -> TimelineBuildResult:
         """Build one final Short from scenes.json with video-first visuals."""
@@ -378,13 +394,13 @@ class VisualTimelineAgent:
         self._narration_seconds = self._read_narration_duration()
         self._normalize_durations()
 
-        self._print_progress(2, "Searching Pexels Videos...")
-        self._search_pexels_videos()
-
-        self._print_progress(3, "Searching Images...")
-        self._search_pexels_images()
-        self._search_pixabay_images()
-        self._download_assets()
+        asset_started = time.perf_counter()
+        self._print_progress(2, "Resolving scene assets (parallel)...")
+        self._restore_from_topic_cache()
+        self._search_and_download_assets_parallel()
+        self._asset_search_seconds = time.perf_counter() - asset_started
+        logger.info("Asset search + download: %.2f sec", self._asset_search_seconds)
+        self._publish_timing(asset=True)
 
         self._print_progress(4, "Building timeline...")
         missing = [s for s in self._scenes if s.asset_path is None]
@@ -398,6 +414,7 @@ class VisualTimelineAgent:
 
         self._temp_dir = Path(tempfile.mkdtemp(prefix="yt_visual_timeline_"))
         try:
+            video_started = time.perf_counter()
             self._print_progress(5, "Applying motion...")
             segment_paths = self._render_timeline_segments()
 
@@ -406,9 +423,14 @@ class VisualTimelineAgent:
             self._print_progress(6, "Adding narration...")
             self._print_progress(7, "Adding captions...")
             self._finalize_with_audio_and_subtitles(visual_path)
+            self._video_render_seconds = time.perf_counter() - video_started
+            logger.info("Video generation: %.2f sec", self._video_render_seconds)
+            self._publish_timing(video=True)
 
             self._print_progress(8, "Completed")
             self._verify_output()
+            self._persist_topic_cache()
+            self._record_timing_splits()
             final_seconds = probe_duration(self.output_path, self.ffprobe)
             result = TimelineBuildResult(
                 output_path=self.output_path.resolve(),
@@ -543,101 +565,201 @@ class VisualTimelineAgent:
             flush=True,
         )
 
-    def _search_pexels_videos(self) -> None:
-        if not self.pexels_video.api_key:
-            logger.warning("PEXELS_API_KEY not set; skipping Pexels video search.")
+    def _restore_from_topic_cache(self) -> None:
+        if not self.topic_cache or not self.topic_cache.is_available():
+            return
+        restored = 0
+        for scene in self._scenes:
+            path, kind, source = self.topic_cache.try_restore_scene(
+                scene.scene_number,
+                scene.query,
+            )
+            if path:
+                scene.asset_path = path
+                scene.asset_kind = kind or "video"
+                scene.source = source
+                restored += 1
+        if restored:
+            print(f"  Topic cache: restored {restored} scene asset(s)", flush=True)
+
+    def _search_and_download_assets_parallel(self) -> None:
+        needs_search = [s for s in self._scenes if not s.asset_path]
+        if needs_search:
+            workers = min(self.max_search_workers, len(needs_search))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(self._resolve_scene_asset, scene): scene
+                    for scene in needs_search
+                }
+                for future in as_completed(futures):
+                    scene = futures[future]
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        logger.error(
+                            "Scene %d asset resolution failed: %s",
+                            scene.scene_number,
+                            exc,
+                        )
+
+        to_download = [
+            s
+            for s in self._scenes
+            if s.pending_url and s.pending_ext and s.asset_kind and not s.asset_path
+        ]
+        if to_download:
+            workers = min(self.max_download_workers, len(to_download))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(self._download_scene_asset, scene): scene
+                    for scene in to_download
+                }
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        logger.error("Parallel download error: %s", exc)
+
+    def _resolve_scene_asset(self, scene: SceneRecord) -> None:
+        """Search Pexels video, Pexels image, and Pixabay in parallel; same priority as sequential."""
+        if scene.asset_path or scene.pending_url:
             return
 
-        for scene in self._scenes:
-            if scene.pending_url:
-                continue
+        def pexels_video_hits():
+            if not self.pexels_video.api_key:
+                return None
             candidates = self.pexels_video.search(scene.query)
-            if not candidates:
-                logger.info("Scene %d: no Pexels video match", scene.scene_number)
-                continue
-            best = candidates[0]
+            return candidates[0] if candidates else None
+
+        def pexels_image_hits():
+            if not self.pexels_images.api_key:
+                return None
+            candidates = self.pexels_images.search(scene.query)
+            return candidates[0] if candidates else None
+
+        def pixabay_hits():
+            if not self.pixabay.api_key:
+                return None
+            candidates = self.pixabay.search(scene.query)
+            return candidates[0] if candidates else None
+
+        video_best = image_best = pixabay_best = None
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                executor.submit(pexels_video_hits): "pexels_video",
+                executor.submit(pexels_image_hits): "pexels_image",
+                executor.submit(pixabay_hits): "pixabay",
+            }
+            for future in as_completed(futures):
+                source = futures[future]
+                try:
+                    hit = future.result()
+                except Exception as exc:
+                    logger.warning(
+                        "Scene %d %s search failed: %s",
+                        scene.scene_number,
+                        source,
+                        exc,
+                    )
+                    continue
+                if source == "pexels_video":
+                    video_best = hit
+                elif source == "pexels_image":
+                    image_best = hit
+                else:
+                    pixabay_best = hit
+
+        if video_best:
             scene.asset_kind = "video"
             scene.source = "pexels_video"
-            scene.pending_url = best.url
+            scene.pending_url = video_best.url
             scene.pending_ext = ".mp4"
             logger.info("Scene %d: Pexels video selected", scene.scene_number)
-
-    def _search_pexels_images(self) -> None:
-        if not self.pexels_images.api_key:
-            logger.warning("PEXELS_API_KEY not set; skipping Pexels image search.")
             return
 
-        for scene in self._scenes:
-            if scene.pending_url:
-                continue
-            candidates = self.pexels_images.search(scene.query)
-            if not candidates:
-                continue
-            best = candidates[0]
+        if image_best:
             scene.asset_kind = "image"
             scene.source = "pexels_image"
-            scene.pending_url = best.url
+            scene.pending_url = image_best.url
             scene.pending_ext = ".jpg"
             logger.info("Scene %d: Pexels image selected", scene.scene_number)
-
-    def _search_pixabay_images(self) -> None:
-        if not self.pixabay.api_key:
-            logger.warning("PIXABAY_API_KEY not set; skipping Pixabay image search.")
             return
 
-        for scene in self._scenes:
-            if scene.pending_url:
-                continue
-            candidates = self.pixabay.search(scene.query)
-            if not candidates:
-                continue
-            best = candidates[0]
+        if pixabay_best:
             scene.asset_kind = "image"
             scene.source = "pixabay_image"
-            scene.pending_url = best.url
+            scene.pending_url = pixabay_best.url
             scene.pending_ext = ".jpg"
             logger.info("Scene %d: Pixabay image selected", scene.scene_number)
 
-    def _download_assets(self) -> None:
+    def _download_scene_asset(self, scene: SceneRecord) -> None:
+        url = scene.pending_url
+        ext = scene.pending_ext
+        if not url or not ext or not scene.asset_kind:
+            return
+
+        cached = self.file_cache.get_cached_path(scene.scene_number, url, ext)
+        if cached:
+            scene.asset_path = cached
+            return
+
         session = requests.Session()
         session.headers["User-Agent"] = "YT-Agent/1.0 (visual-timeline-agent)"
+        dest = self.assets_dir / f"scene_{scene.scene_number}{ext}"
+        try:
+            self._download_file(session, url, dest)
+            if scene.asset_kind == "image":
+                self._verify_image(dest)
+            scene.asset_path = dest
+            self.file_cache.record(
+                scene.scene_number,
+                url,
+                dest,
+                scene.asset_kind,
+                scene.source or "unknown",
+            )
+            logger.info(
+                "Scene %d downloaded (%s) -> %s",
+                scene.scene_number,
+                scene.source,
+                dest,
+            )
+        except (TimelineAssetError, OSError) as exc:
+            logger.error("Scene %d download failed: %s", scene.scene_number, exc)
+            scene.asset_path = None
+            scene.asset_kind = None
+            scene.source = None
 
+    def _persist_topic_cache(self) -> None:
+        if not self.topic_cache:
+            return
         for scene in self._scenes:
-            url = scene.pending_url
-            ext = scene.pending_ext
-            if not url or not ext or not scene.asset_kind:
-                continue
-
-            cached = self.file_cache.get_cached_path(scene.scene_number, url, ext)
-            if cached:
-                scene.asset_path = cached
-                logger.info("Scene %d: using cached %s", scene.scene_number, cached.name)
-                continue
-
-            dest = self.assets_dir / f"scene_{scene.scene_number}{ext}"
-            try:
-                self._download_file(session, url, dest)
-                if scene.asset_kind == "image":
-                    self._verify_image(dest)
-                scene.asset_path = dest
-                self.file_cache.record(
+            if scene.asset_path and scene.asset_kind:
+                self.topic_cache.save_scene(
                     scene.scene_number,
-                    url,
-                    dest,
+                    scene.query,
+                    scene.asset_path,
                     scene.asset_kind,
                     scene.source or "unknown",
                 )
-                logger.info(
-                    "Scene %d downloaded (%s) -> %s",
-                    scene.scene_number,
-                    scene.source,
-                    dest,
-                )
-            except (TimelineAssetError, OSError) as exc:
-                logger.error("Scene %d download failed: %s", scene.scene_number, exc)
-                scene.asset_path = None
-                scene.asset_kind = None
-                scene.source = None
+
+    def _publish_timing(self, *, asset: bool = False, video: bool = False) -> None:
+        if not self._timer:
+            return
+        try:
+            from pipeline_timing import PHASE_ASSET_SEARCH, PHASE_VIDEO
+
+            if asset and self._asset_search_seconds > 0:
+                self._timer.add(PHASE_ASSET_SEARCH, self._asset_search_seconds)
+            if video and self._video_render_seconds > 0:
+                self._timer.add(PHASE_VIDEO, self._video_render_seconds)
+        except ImportError:
+            return
+        if self._on_timing_sync:
+            self._on_timing_sync()
+
+    def _record_timing_splits(self) -> None:
+        self._publish_timing(asset=True, video=True)
 
     def _download_file(self, session: requests.Session, url: str, output_path: Path) -> None:
         try:
@@ -719,6 +841,8 @@ class VisualTimelineAgent:
             "-an",
             "-c:v",
             "libx264",
+            "-preset",
+            "fast",
             "-pix_fmt",
             "yuv420p",
             str(output_path),
@@ -751,6 +875,8 @@ class VisualTimelineAgent:
             str(scene.duration_seconds),
             "-c:v",
             "libx264",
+            "-preset",
+            "fast",
             "-pix_fmt",
             "yuv420p",
             "-an",
@@ -780,15 +906,11 @@ class VisualTimelineAgent:
             "0",
             "-i",
             str(concat_list),
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            str(VIDEO_FPS),
+            "-c",
+            "copy",
             str(visual_path),
         ]
-        self._run_ffmpeg(command, "concat visual timeline")
+        self._run_ffmpeg(command, "concat visual timeline (stream copy)")
         logger.info("Visual timeline built: %s", visual_path)
         return visual_path
 
@@ -819,7 +941,7 @@ class VisualTimelineAgent:
             "-c:v",
             "libx264",
             "-preset",
-            "medium",
+            "fast",
             "-crf",
             "23",
             "-pix_fmt",

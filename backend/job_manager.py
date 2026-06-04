@@ -83,15 +83,25 @@ class Job:
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     workspace: Path = field(default_factory=Path)
+    phase_timings: list[dict[str, Any]] = field(default_factory=list)
+    performance_summary: list[str] = field(default_factory=list)
+    total_duration_seconds: float | None = None
 
     def progress_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "job_id": self.job_id,
             "current_phase": self.current_phase,
             "completed": self.completed,
             "total": self.total,
             "status": self.status.value,
+            "phase_timings": list(self.phase_timings),
+            "performance_summary": list(self.performance_summary),
         }
+        if self.total_duration_seconds is not None:
+            data["total_duration_seconds"] = round(self.total_duration_seconds, 2)
+        if self.status == JobStatus.FAILED and self.error:
+            data["error"] = self.error
+        return data
 
     def result_dict(self) -> dict[str, Any]:
         if self.status != JobStatus.COMPLETED or not self.result:
@@ -109,6 +119,9 @@ class Job:
             "thumbnail_path": self.result.thumbnail_path,
             "script_path": self.result.script_path,
             "status": self.status.value,
+            "phase_timings": list(self.phase_timings),
+            "performance_summary": list(self.performance_summary),
+            "total_duration_seconds": self.total_duration_seconds,
         }
 
 
@@ -202,6 +215,17 @@ class JobManager:
             job.completed = completed
             job.updated_at = datetime.now(timezone.utc).isoformat()
 
+    def update_performance(self, job_id: str, timer: Any) -> None:
+        """Sync pipeline timer state into the job for progress polling."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return
+            job.phase_timings = timer.to_dict_list()
+            job.performance_summary = timer.summary_lines()
+            job.total_duration_seconds = timer.total
+            job.updated_at = datetime.now(timezone.utc).isoformat()
+
     def complete(self, job_id: str, result: JobResult) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -280,6 +304,8 @@ class JobManager:
         if not (workspace / "thumbnail.png").is_file() and THUMBNAIL_PATH.is_file():
             shutil.copy2(THUMBNAIL_PATH, workspace / "thumbnail.png")
 
+        _write_performance_file(job)
+
         return JobResult(
             title=title.strip(),
             description=description.strip(),
@@ -294,3 +320,33 @@ def _read_text(path: Path) -> str:
     if path.is_file():
         return path.read_text(encoding="utf-8")
     return ""
+
+
+def _write_performance_file(job: Job) -> None:
+    """Persist timing summary beside job artifacts for later review."""
+    if not job.performance_summary and not job.phase_timings:
+        return
+    lines: list[str] = ["AutoShorts — Pipeline performance", ""]
+    if job.phase_timings:
+        for entry in job.phase_timings:
+            if not isinstance(entry, dict):
+                continue
+            label = entry.get("label", "Phase")
+            duration = entry.get("duration_seconds", 0)
+            lines.append(f"{label}: {float(duration):.1f} sec")
+            start = entry.get("start_time")
+            end = entry.get("end_time")
+            if start:
+                lines.append(f"  START: {start}")
+            if end:
+                lines.append(f"  END: {end}")
+            lines.append(f"  DURATION: {float(duration):.2f} sec")
+            lines.append("")
+    elif job.performance_summary:
+        lines.extend(job.performance_summary)
+        lines.append("")
+    if job.total_duration_seconds is not None:
+        lines.append(f"TOTAL: {job.total_duration_seconds:.1f} sec")
+    job.workspace.mkdir(parents=True, exist_ok=True)
+    perf_path = job.workspace / "performance.txt"
+    perf_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
