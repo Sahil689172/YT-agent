@@ -1,104 +1,181 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowRight } from 'lucide-react'
+import { Home, Loader2 } from 'lucide-react'
 import CircularProgress from '../components/ui/CircularProgress'
 import GlassTerminal from '../components/ui/GlassTerminal'
+import ProgressBar from '../components/ui/ProgressBar'
+import ErrorBanner from '../components/ui/ErrorBanner'
 import NeoButton from '../components/ui/NeoButton'
-import { PROCESSING_PHASES } from '../constants/pipeline'
+import RotatingLoader from '../components/ui/RotatingLoader'
+import { useGeneration } from '../context/GenerationContext'
+import { ApiError } from '../lib/api'
+import {
+  TOPIC_PHASES,
+  SCRIPT_PHASES,
+  buildTerminalLogs,
+  progressPercent,
+} from '../constants/phases'
+
+const POLL_MS = 2000
 
 export default function ProcessingPage() {
   const navigate = useNavigate()
-  const [phaseIndex, setPhaseIndex] = useState(0)
-  const [allLogs, setAllLogs] = useState([])
-  const [activeLineIndex, setActiveLineIndex] = useState(-1)
-  const [complete, setComplete] = useState(false)
-  const timersRef = useRef([])
+  const {
+    jobId,
+    mode,
+    progress,
+    refreshProgress,
+    fetchAndStoreResult,
+    error,
+    clearJob,
+  } = useGeneration()
 
-  const currentPhase = PROCESSING_PHASES[phaseIndex]
+  const [pollError, setPollError] = useState(null)
+  const navigatingRef = useRef(false)
+  const phases = mode === 'script' ? SCRIPT_PHASES : TOPIC_PHASES
 
   useEffect(() => {
-    timersRef.current.forEach(clearTimeout)
-    timersRef.current = []
-
-    if (!currentPhase) {
-      setComplete(true)
-      return
+    if (!jobId) {
+      navigate('/', { replace: true })
     }
+  }, [jobId, navigate])
 
-    const logs = currentPhase.logs
-    let accumulatedDelay = 300
+  useEffect(() => {
+    if (!jobId) return undefined
 
-    logs.forEach((line) => {
-      const showTimer = setTimeout(() => {
-        setAllLogs((prev) => {
-          const next = [...prev, line]
-          setActiveLineIndex(next.length - 1)
-          return next
-        })
-      }, accumulatedDelay)
-      timersRef.current.push(showTimer)
-      accumulatedDelay += line.length * 24 + 700
-    })
+    let cancelled = false
 
-    const phaseEndTimer = setTimeout(() => {
-      if (phaseIndex < PROCESSING_PHASES.length - 1) {
-        setPhaseIndex((p) => p + 1)
-        setActiveLineIndex(-1)
-      } else {
-        setComplete(true)
-        setActiveLineIndex(-1)
+    async function poll() {
+      try {
+        const data = await refreshProgress(jobId)
+        if (cancelled || navigatingRef.current) return
+
+        setPollError(null)
+
+        if (data.status === 'completed') {
+          navigatingRef.current = true
+          await fetchAndStoreResult(jobId)
+          if (!cancelled) navigate('/result', { replace: true })
+          return
+        }
+
+        if (data.status === 'failed') {
+          setPollError(
+            new ApiError(
+              'Generation Failed',
+              data.error || 'Pipeline failed. Check the API logs.',
+            ),
+          )
+        }
+      } catch (err) {
+        if (cancelled) return
+        setPollError(
+          err instanceof ApiError
+            ? err
+            : new ApiError('Network Error', err?.message || 'Lost connection to API.'),
+        )
       }
-    }, accumulatedDelay + 500)
-    timersRef.current.push(phaseEndTimer)
-
-    return () => {
-      timersRef.current.forEach(clearTimeout)
-      timersRef.current = []
     }
-  }, [phaseIndex, currentPhase])
 
-  const progress = complete ? 100 : (currentPhase?.progress ?? 0)
+    poll()
+    const id = setInterval(poll, POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [jobId, refreshProgress, fetchAndStoreResult, navigate])
+
+  const terminalLines = useMemo(() => {
+    if (!progress) {
+      return ['Connecting to pipeline…', 'Waiting for job status…']
+    }
+    return buildTerminalLogs(phases, {
+      ...progress,
+      error: progress.error,
+    })
+  }, [phases, progress])
+
+  const percent = progress
+    ? progressPercent(progress.completed, progress.total)
+    : 0
+
+  const activeLineIndex = terminalLines.findIndex((l) => l.startsWith('Running'))
+  const displayError = pollError || error
+  const isRunning =
+    progress?.status === 'running' ||
+    progress?.status === 'queued' ||
+    !progress
 
   return (
-    <div className="max-w-2xl mx-auto space-y-10">
+    <div className="max-w-2xl mx-auto space-y-8">
       <motion.header
         className="text-center"
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
       >
+        <div className="flex justify-center mb-6">
+          <RotatingLoader size={52} />
+        </div>
         <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-white text-glow">
           Building Your Short
         </h1>
-        <p className="mt-2 text-white/40 text-sm">Pipeline running in workspace</p>
+        <p className="mt-2 text-white/40 text-sm">
+          {progress?.current_phase || 'Initializing pipeline…'}
+        </p>
       </motion.header>
 
+      {displayError && (
+        <ErrorBanner
+          title={displayError.title}
+          message={displayError.message}
+        />
+      )}
+
       <motion.div
-        className="flex justify-center"
-        initial={{ opacity: 0, scale: 0.95 }}
+        className="space-y-4"
+        initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 0.15 }}
       >
-        <div className="neo-panel-elevated rounded-3xl p-8 glow-soft">
+        <div className="neo-panel-elevated rounded-3xl p-8 glow-soft flex justify-center">
           <CircularProgress
-            progress={progress}
-            label={complete ? 'Complete' : `Phase ${phaseIndex + 1} — ${currentPhase?.label}`}
+            progress={isRunning && percent < 100 ? Math.max(percent, 5) : percent}
+            label={
+              progress
+                ? `${progress.completed} / ${progress.total} — ${progress.current_phase}`
+                : 'Starting…'
+            }
           />
         </div>
+        <ProgressBar value={percent} />
+        {progress && (
+          <p className="text-center text-xs text-white/35 font-mono">
+            {progress.status === 'queued' ? 'Queued — waiting for pipeline' : 'Live from API'}
+          </p>
+        )}
       </motion.div>
 
-      <GlassTerminal lines={allLogs} activeLineIndex={activeLineIndex} />
+      <GlassTerminal
+        lines={terminalLines}
+        activeLineIndex={activeLineIndex >= 0 ? activeLineIndex : -1}
+      />
 
-      {complete && (
-        <motion.div
-          className="flex justify-center pt-2"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <NeoButton icon={ArrowRight} onClick={() => navigate('/result')}>
-            View Results
+      {isRunning && !displayError && (
+        <div className="flex items-center justify-center gap-2 text-white/40 text-sm">
+          <Loader2 size={16} className="animate-spin" />
+          Polling every 2 seconds…
+        </div>
+      )}
+
+      {displayError && (
+        <div className="flex justify-center gap-3">
+          <NeoButton variant="ghost" icon={Home} onClick={() => {
+            clearJob()
+            navigate('/')
+          }}>
+            Return Home
           </NeoButton>
-        </motion.div>
+        </div>
       )}
     </div>
   )

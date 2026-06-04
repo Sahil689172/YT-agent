@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Lightbulb, FileText, Sparkles, Info } from 'lucide-react'
+import { Lightbulb, FileText, Sparkles, Info, Loader2 } from 'lucide-react'
 import NeoCard from '../components/ui/NeoCard'
 import NeoInput from '../components/ui/NeoInput'
 import NeoTextarea from '../components/ui/NeoTextarea'
 import NeoButton from '../components/ui/NeoButton'
+import ErrorBanner from '../components/ui/ErrorBanner'
+import { useGeneration } from '../context/GenerationContext'
+import { ApiError } from '../lib/api'
 
 const SCRIPT_RULES = [
   'Recommended 80–100 words',
@@ -15,8 +18,43 @@ const SCRIPT_RULES = [
 
 export default function HomePage() {
   const navigate = useNavigate()
+  const { startTopic, startScript, loading, error, clearJob } = useGeneration()
   const [topic, setTopic] = useState('')
   const [script, setScript] = useState('')
+  const [localError, setLocalError] = useState(null)
+
+  const displayError = localError || error
+
+  async function handleTopicGenerate() {
+    setLocalError(null)
+    clearJob()
+    try {
+      await startTopic(topic)
+      navigate('/processing')
+    } catch (err) {
+      if (!(err instanceof ApiError)) {
+        setLocalError(
+          new ApiError('Network Error', err?.message || 'Could not start generation.'),
+        )
+      }
+    }
+  }
+
+  async function handleScriptGenerate() {
+    setLocalError(null)
+    clearJob()
+    const topicLabel = topic.trim() || 'Custom Script'
+    try {
+      await startScript(script, topicLabel)
+      navigate('/processing')
+    } catch (err) {
+      if (!(err instanceof ApiError)) {
+        setLocalError(
+          new ApiError('Network Error', err?.message || 'Could not start generation.'),
+        )
+      }
+    }
+  }
 
   return (
     <div className="space-y-12 md:space-y-16">
@@ -42,6 +80,17 @@ export default function HomePage() {
         </p>
       </motion.header>
 
+      {displayError && (
+        <ErrorBanner
+          title={displayError.title}
+          message={displayError.message}
+          onDismiss={() => {
+            setLocalError(null)
+            clearJob()
+          }}
+        />
+      )}
+
       <div className="grid gap-6 lg:grid-cols-2 lg:gap-8">
         <NeoCard
           badge="Mode 01"
@@ -55,16 +104,18 @@ export default function HomePage() {
               id="topic"
               label="YouTube Shorts Topic"
               icon={Sparkles}
-              placeholder="e.g. 5 productivity hacks for remote workers"
+              placeholder='e.g. What is EBITDA?'
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
+              disabled={loading}
             />
             <NeoButton
-              className="w-full"
-              icon={Sparkles}
-              onClick={() => navigate('/processing')}
+              className={`w-full ${loading ? '[&_svg]:animate-spin' : ''}`}
+              icon={loading ? Loader2 : Sparkles}
+              onClick={handleTopicGenerate}
+              disabled={loading || !topic.trim()}
             >
-              Generate Video
+              {loading ? 'Starting…' : 'Generate Video'}
             </NeoButton>
           </div>
         </NeoCard>
@@ -72,7 +123,7 @@ export default function HomePage() {
         <NeoCard
           badge="Mode 02"
           title="Custom Script Mode"
-          subtitle="Bring your own narration — we handle production"
+          subtitle="Paste plain narration — no JSON or markdown required"
           icon={FileText}
           delay={0.2}
         >
@@ -80,9 +131,10 @@ export default function HomePage() {
             <NeoTextarea
               id="script"
               label="Your Script"
-              placeholder="Paste your narration here…"
+              placeholder="EBITDA stands for Earnings Before Interest, Taxes, Depreciation, and Amortization..."
               value={script}
               onChange={(e) => setScript(e.target.value)}
+              disabled={loading}
             />
             <ul className="neo-inset rounded-xl p-4 space-y-2 border border-white/[0.04]">
               {SCRIPT_RULES.map((rule) => (
@@ -93,11 +145,12 @@ export default function HomePage() {
               ))}
             </ul>
             <NeoButton
-              className="w-full"
-              icon={FileText}
-              onClick={() => navigate('/processing')}
+              className={`w-full ${loading ? '[&_svg]:animate-spin' : ''}`}
+              icon={loading ? Loader2 : FileText}
+              onClick={handleScriptGenerate}
+              disabled={loading || !script.trim()}
             >
-              Generate Video
+              {loading ? 'Starting…' : 'Generate Video'}
             </NeoButton>
           </div>
         </NeoCard>

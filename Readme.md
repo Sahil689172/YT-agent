@@ -468,6 +468,55 @@ CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173`.
 
 ---
 
+## Frontend ↔ Backend Architecture
+
+The React app (`frontend/`) talks to the FastAPI server over HTTP. No terminal is required for end users.
+
+```text
+┌─────────────────┐     POST /generate/topic|script      ┌──────────────────┐
+│  Home Page      │ ───────────────────────────────────► │  FastAPI         │
+│  Topic / Script │ ◄──────────── job_id ──────────────── │  backend/api.py  │
+└────────┬────────┘                                        └────────┬─────────┘
+         │                                                           │
+         ▼                                                           ▼
+┌─────────────────┐     GET /progress/{id} (2s poll)       ┌──────────────────┐
+│  Processing     │ ◄────────────────────────────────────── │  Job manager +   │
+│  Live progress  │                                        │  pipeline_runner │
+└────────┬────────┘                                        └────────┬─────────┘
+         │ status = completed                                        │
+         ▼                                                           ▼
+┌─────────────────┐     GET /result/{id}                 jobs/{id}/output.mp4
+│  Results        │ ◄── video, thumbnail, metadata ─── thumbnails, scripts/
+└─────────────────┘
+```
+
+### Topic Mode
+
+User enters a **YouTube Shorts topic** (e.g. `What is EBITDA?`) and clicks **Generate Video**. The frontend calls `POST /generate/topic`. The backend runs the full pipeline: script → metadata → voice → captions → scenes → visual timeline → thumbnail.
+
+### Custom Script Mode
+
+User **pastes plain narration** in the textarea (no JSON or markdown). Before submit, the UI **sanitizes** the text (removes lines like `Narrator:`, `Here's a script for your YouTube Shorts`, scene labels, etc.). Then `POST /generate/script` skips AI script generation and runs the rest of the pipeline.
+
+### Generation flow (no page refresh)
+
+| Step | Frontend | Backend |
+|------|----------|---------|
+| Start | Store `job_id` in React context | Queue job, run pipeline in worker |
+| Progress | Poll `/progress/{job_id}` | Update `current_phase`, `completed` / `total` |
+| Done | Auto-navigate to Results | Copy artifacts to `jobs/{job_id}/` |
+| Display | Video/thumbnail via `/jobs/...` URLs | Static mount serves job files |
+
+### Error handling (UI)
+
+Friendly messages for: **Backend Offline**, **Network Error**, **Invalid Script**, **Generation Failed**, **Video Creation Failed**.
+
+### Environment
+
+Frontend: `frontend/.env` → `VITE_API_BASE_URL` (default `http://127.0.0.1:8000`)
+
+---
+
 ## License
 
 Add your license here if publishing publicly on GitHub.

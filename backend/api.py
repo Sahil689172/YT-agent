@@ -8,9 +8,10 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from backend.job_manager import JobManager, JobStatus
+from backend.job_manager import JOBS_DIR, JobManager, JobStatus
 from backend.logging_config import configure_logging
 from backend.pipeline_runner import pipeline_worker
 
@@ -226,3 +227,7 @@ def _public_status(status: JobStatus) -> str:
     if status == JobStatus.QUEUED:
         return "queued"
     return status.value
+
+
+JOBS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/jobs", StaticFiles(directory=JOBS_DIR), name="jobs")

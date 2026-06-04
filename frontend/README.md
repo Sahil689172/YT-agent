@@ -1,21 +1,31 @@
 # AutoShorts Frontend
 
-Premium skeuomorphic / neumorphic UI for the AutoShorts desktop-style experience. UI-only — no backend or API calls.
+Premium UI for AutoShorts, connected to the FastAPI backend.
 
 ## Stack
 
 - React 19 + Vite 6
-- Tailwind CSS 4
+- Tailwind CSS 3
 - Framer Motion
 - Lucide React
 
-## Design
+## Configuration
 
-- Monochrome palette (`#0a0a0a` → `#1a1a1a`)
-- Depth via neumorphic shadows, glass panels, soft white glow
-- VisionOS / premium DAW-inspired aesthetic
+Copy `.env.example` to `.env` if the API is not on the default host:
 
-## Run
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+## Run (full stack)
+
+**Terminal 1 — API** (from project root):
+
+```bash
+python -m uvicorn backend.api:app --reload
+```
+
+**Terminal 2 — UI**:
 
 ```bash
 cd frontend
@@ -23,22 +33,25 @@ npm install
 npm run dev
 ```
 
-## Flow
+Open `http://localhost:5173`
 
-1. **Splash** — AutoShorts, tagline, rotating loader, status lines, fade to app
-2. **Home** — Topic Mode & Custom Script Mode (elevated neo cards)
-3. **Processing** — Circular progress, glass terminal with typing animation
-4. **Result** — Floating dashboard panels, download placeholders
+## Frontend ↔ Backend flow
+
+1. **Topic Mode** — `POST /generate/topic` → `job_id` → `/processing`
+2. **Custom Script** — sanitize script → `POST /generate/script` → `job_id` → `/processing`
+3. **Processing** — poll `GET /progress/{job_id}` every 2s
+4. **Result** — on `status: completed`, `GET /result/{job_id}` → video, thumbnail, metadata
+
+State (`job_id`, progress, result, errors) lives in `GenerationContext` — no full page reload.
 
 ## Structure
 
 ```text
 src/
-├── components/
-│   ├── splash/SplashScreen.jsx
-│   ├── layout/AppShell.jsx, PageTransition.jsx
-│   └── ui/          NeoButton, NeoInput, NeoCard, GlassTerminal, etc.
+├── context/GenerationContext.jsx
+├── lib/api.js
+├── utils/sanitizeScript.js
+├── constants/phases.js
 ├── pages/           Home, Processing, Result
-├── hooks/           useTypingEffect
-└── constants/       pipeline phases & placeholders
+└── components/ui/
 ```

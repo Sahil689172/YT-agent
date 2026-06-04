@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import SplashScreen from './components/splash/SplashScreen'
 import AppShell from './components/layout/AppShell'
 import PageTransition from './components/layout/PageTransition'
+import { GenerationProvider } from './context/GenerationContext'
 import HomePage from './pages/HomePage'
 import ProcessingPage from './pages/ProcessingPage'
 import ResultPage from './pages/ResultPage'
@@ -56,9 +57,11 @@ export default function App() {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
     >
-      <AppShell>
-        <AnimatedRoutes />
-      </AppShell>
+      <GenerationProvider>
+        <AppShell>
+          <AnimatedRoutes />
+        </AppShell>
+      </GenerationProvider>
     </motion.div>
   )
 }

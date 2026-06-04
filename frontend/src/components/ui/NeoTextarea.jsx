@@ -1,4 +1,4 @@
-export default function NeoTextarea({ id, label, className = '', rows = 6, ...props }) {
+export default function NeoTextarea({ id, label, className = '', rows = 6, disabled, ...props }) {
   return (
     <div className={`space-y-2 ${className}`}>
       {label && (
@@ -10,7 +10,8 @@ export default function NeoTextarea({ id, label, className = '', rows = 6, ...pr
         <textarea
           id={id}
           rows={rows}
-          className="w-full resize-y bg-transparent px-4 py-3.5 text-[15px] leading-relaxed text-white placeholder:text-white/25 outline-none min-h-[140px]"
+          disabled={disabled}
+          className="w-full resize-y bg-transparent px-4 py-3.5 text-[15px] leading-relaxed text-white placeholder:text-white/25 outline-none min-h-[140px] disabled:opacity-50"
           {...props}
         />
       </div>

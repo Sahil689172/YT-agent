@@ -1,4 +1,4 @@
-export default function NeoInput({ id, label, icon: Icon, className = '', ...props }) {
+export default function NeoInput({ id, label, icon: Icon, className = '', disabled, ...props }) {
   return (
     <div className={`space-y-2 ${className}`}>
       {label && (
@@ -14,9 +14,10 @@ export default function NeoInput({ id, label, icon: Icon, className = '', ...pro
         )}
         <input
           id={id}
+          disabled={disabled}
           className={`
             w-full bg-transparent py-3.5 text-[15px] text-white placeholder:text-white/25
-            outline-none transition-colors focus:text-white
+            outline-none transition-colors focus:text-white disabled:opacity-50
             ${Icon ? 'pl-11 pr-4' : 'px-4'}
           `}
           {...props}
