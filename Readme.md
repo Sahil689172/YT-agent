@@ -1,12 +1,14 @@
-# YT-Agent
+# AutoShorts
 
-**AI-Powered Content Creation Platform** — Turn ideas or your own scripts into finished vertical videos with voice, captions, stock visuals, thumbnails, and publish-ready metadata. Local-first, automation-ready, and built for Shorts, Reels, and social video.
+**AI-powered Shorts studio** — Turn ideas or your own scripts into finished vertical videos with voice, captions, stock visuals, thumbnails, and publish-ready metadata. Local-first pipeline (Ollama, Piper, Whisper, FFmpeg) plus a premium React web UI for creation and progress tracking.
+
+> Previously documented as *YT-Agent*; the product UI and repo folder use **AutoShorts**.
 
 ---
 
 ## Product Vision
 
-YT-Agent is no longer just a YouTube automation tool. It is a **content creation platform** with two ways to produce video:
+AutoShorts is a **content creation platform** with two ways to produce video:
 
 1. **AI Mode** — Start from a topic; the system writes the script and runs the full pipeline.
 2. **Custom Script Mode** — Start from your script; the system handles production from voice through thumbnail and metadata.
@@ -63,7 +65,7 @@ Thumbnail
 Metadata
 ```
 
-**Today:** Supported by placing your script in `scripts/script.txt`, then running pipeline phases from voice onward (see [Custom Script Mode](#custom-script-mode)). A dedicated CLI entry point for Custom Script Mode is on the roadmap.
+**Today:** Supported via the web UI (`/create` → Custom Script), `POST /generate/script`, or by placing your script in `scripts/script.txt` and running phases from voice onward (see [Custom Script Mode](#custom-script-mode)).
 
 ---
 
@@ -102,7 +104,7 @@ Metadata
 | **6** | Background Music Agent | ⬜ Planned |
 | **7** | YouTube Upload Agent | ⬜ Planned |
 | **8** | Automation Agent | ⬜ Planned |
-| — | Custom Script CLI mode | ⬜ Planned |
+| — | Custom Script via API + UI | ✅ |
 | — | AI image / video generation | ⬜ Planned |
 
 ### Visual asset sources
@@ -221,6 +223,8 @@ videos/output.mp4
 | **Visual assets** | Pexels API (photos + videos), Pixabay API |
 | **Video** | FFmpeg, ffprobe |
 | **Thumbnails** | Pillow |
+| **API** | FastAPI, Uvicorn |
+| **Frontend** | React 19, Vite, React Router, Tailwind CSS, Framer Motion, GSAP |
 | **Future upload** | YouTube Data API v3 (planned) |
 
 ---
@@ -240,6 +244,7 @@ videos/output.mp4
 | `assets/cache/` | API search cache (24h) |
 | `videos/output.mp4` | Final video (1080×1920) |
 | `thumbnails/output.png` | Thumbnail (1280×720) |
+| `jobs/{job_id}/` | Per-run API artifacts (video, thumbnail, script, metadata, `performance.txt`) |
 
 ---
 
@@ -329,13 +334,28 @@ Re-running the **same topic** reuses:
 |----------|--------|
 | `CAPTIONS_USE_WHISPER=1` | Force Whisper even when script exists |
 | `FFMPEG_EXECUTABLE` | Custom FFmpeg path |
+| `ASSET_SEARCH_WORKERS` | Parallel scene search workers (default 12) |
+| `ASSET_DOWNLOAD_WORKERS` | Parallel download workers (default 10) |
 
 ---
 
 ## Project Structure
 
 ```text
-YT-agent/
+AutoShorts/
+├── frontend/                       # React UI (landing, create, processing, result)
+│   ├── src/pages/
+│   │   ├── LandingPage.jsx         # Marketing home (/)
+│   │   ├── HomePage.jsx            # Create studio (/create)
+│   │   ├── ProcessingPage.jsx
+│   │   └── ResultPage.jsx
+│   └── src/components/
+│       ├── landing/                # CrowdCanvas, GlassButton
+│       └── create/                 # StudioBackground, StudioAgentVideo
+├── backend/
+│   ├── api.py
+│   ├── job_manager.py
+│   └── pipeline_runner.py
 ├── agents/
 │   ├── scene_agent.py
 │   ├── visual_timeline_agent.py
@@ -545,18 +565,68 @@ Default URL: `http://127.0.0.1:8000`
 
 ```bash
 cd frontend
-npm install
+npm install    # includes gsap for landing crowd animation
 npm run dev
 ```
+
+Default UI: `http://127.0.0.1:5173`
 
 CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173`.
 
 ### 5. Frontend integration flow
 
-1. `POST /generate/topic` or `/generate/script` → store `job_id`
-2. Poll `GET /progress/{job_id}` every few seconds
-3. When `status` is `completed`, call `GET /result/{job_id}`
-4. Use returned `video_path`, `thumbnail_path`, and metadata in the UI
+1. Open `http://127.0.0.1:5173` → landing; click **Get Started** → `/create`
+2. Choose **Topic Mode** or **Custom Script**, submit → `POST /generate/topic` or `/generate/script` → store `job_id`
+3. Navigate to `/processing`; poll `GET /progress/{job_id}` every few seconds
+4. When `status` is `completed`, load `GET /result/{job_id}` on `/result`
+5. Use returned `video_path`, `thumbnail_path`, metadata, and performance fields in the UI
+
+### Frontend dependencies
+
+| Package | Use |
+|---------|-----|
+| `framer-motion` | Page transitions, form reveals, button hover |
+| `gsap` | Landing page crowd canvas animation |
+| `lucide-react` | Icons |
+| `react-router-dom` | `/`, `/create`, `/processing`, `/result` |
+
+---
+
+## Web UI (Frontend)
+
+The React app is a **premium studio experience**, not a dashboard. Routes:
+
+| Route | Page | Description |
+|-------|------|-------------|
+| `/` | **Landing** | White marketing home — hero, animated crowd, glass capability cards, pipeline, CTA |
+| `/create` | **Create studio** | Dark full-screen studio — topic or custom script → generation |
+| `/processing` | **Processing** | Live phase progress + performance timings |
+| `/result` | **Result** | Video, thumbnail, metadata, download/copy |
+
+### Landing page (`/`)
+
+- **Hero:** Headline, CTAs (Get Started → `/create`, Watch Demo), compact layout so the crowd is visible without scrolling.
+- **Crowd animation:** Open Peeps sprite sheet + GSAP (`CrowdCanvas`) — dense walking crowd in the lower viewport, layered depth, smooth motion.
+- **Capabilities:** Six features in **glassmorphism** cards (frosted blur, light borders).
+- **Pipeline:** Animated workflow steps (topic → voice → captions → scenes → visuals → video → thumbnail).
+- **Theme:** White background, black typography (Inter).
+
+### Create page (`/create`)
+
+Inspired by high-end agency landings (e.g. Mainframe-style interaction), adapted for AutoShorts:
+
+- **Theme:** `#050505` cinematic dark — subtle grid, gradients, floating particles, light beams.
+- **Nav:** AutoShorts logo + **Back to Home** pill.
+- **Typewriter intro:** Sequential lines with blinking cursor before mode selection.
+- **Mode pills:** **Topic Mode** or **Custom Script** — selected form animates in (Framer Motion).
+- **Studio agent (desktop):** Mouse-scrub video on the right — head pose follows cursor via spring-smoothed frame mapping + seek queue (`StudioAgentVideo`).
+- **Inputs:** Glassmorphism topic field / script textarea; premium **Generate** button (glow + lift on hover).
+- **Script sanitization:** Strips `Narrator:`, `Voiceover:`, `Scene N:`, `Here's your script:` before API submit (`sanitizeScript.js`).
+
+### Processing & result
+
+- Dark neumorphic UI (existing `AppShell` on `/processing` and `/result`).
+- Processing shows **phase timings** and optimization summary when the API provides `phase_timings` / `performance_summary`.
 
 ---
 
@@ -566,29 +636,29 @@ The React app (`frontend/`) talks to the FastAPI server over HTTP. No terminal i
 
 ```text
 ┌─────────────────┐     POST /generate/topic|script      ┌──────────────────┐
-│  Home Page      │ ───────────────────────────────────► │  FastAPI         │
+│  /create        │ ───────────────────────────────────► │  FastAPI         │
 │  Topic / Script │ ◄──────────── job_id ──────────────── │  backend/api.py  │
 └────────┬────────┘                                        └────────┬─────────┘
          │                                                           │
          ▼                                                           ▼
-┌─────────────────┐     GET /progress/{id} (2s poll)       ┌──────────────────┐
-│  Processing     │ ◄────────────────────────────────────── │  Job manager +   │
+┌─────────────────┐     GET /progress/{id} (poll)        ┌──────────────────┐
+│  /processing    │ ◄────────────────────────────────────── │  Job manager +   │
 │  Live progress  │                                        │  pipeline_runner │
 └────────┬────────┘                                        └────────┬─────────┘
          │ status = completed                                        │
          ▼                                                           ▼
 ┌─────────────────┐     GET /result/{id}                 jobs/{id}/output.mp4
-│  Results        │ ◄── video, thumbnail, metadata ─── thumbnails, scripts/
+│  /result        │ ◄── video, thumbnail, metadata ─── thumbnails, scripts/
 └─────────────────┘
 ```
 
 ### Topic Mode
 
-User enters a **YouTube Shorts topic** (e.g. `What is EBITDA?`) and clicks **Generate Video**. The frontend calls `POST /generate/topic`. The backend runs the full pipeline: script → metadata → voice → captions → scenes → visual timeline → thumbnail.
+On `/create`, user picks **Topic Mode**, enters a Shorts topic (e.g. `What is EBITDA?`), and clicks **Generate**. The frontend calls `POST /generate/topic`. The backend runs the full pipeline: script → metadata → voice → captions → scenes → visual timeline → thumbnail.
 
 ### Custom Script Mode
 
-User **pastes plain narration** in the textarea (no JSON or markdown). Before submit, the UI **sanitizes** the text (removes lines like `Narrator:`, `Here's a script for your YouTube Shorts`, scene labels, etc.). Then `POST /generate/script` skips AI script generation and runs the rest of the pipeline.
+User picks **Custom Script**, pastes plain narration (80–120 words recommended). The UI **sanitizes** prefixes (`Narrator:`, `Voiceover:`, scene labels, etc.) then calls `POST /generate/script`, which skips AI script generation and runs the rest of the pipeline.
 
 ### Generation flow (no page refresh)
 
