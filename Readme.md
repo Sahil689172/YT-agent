@@ -30,6 +30,10 @@ Automatically generates:
   <a href="https://github.com/Sahil689172/AutoShorts/raw/main/public/v1.mp4">
     <img
       src="./public/i.png"
+
+https://github.com/user-attachments/assets/0100e3cc-c192-4e7f-859d-21e75c1d7ae6
+
+
       alt="Watch AutoShorts demo"
       width="720"
     />
