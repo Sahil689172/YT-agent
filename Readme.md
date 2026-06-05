@@ -27,14 +27,27 @@ Automatically generates:
 ## Demo
 
 <p align="center">
+  <a href="https://github.com/Sahil689172/AutoShorts/raw/main/public/v1.mp4">
+    <img
+      src="./public/i.png"
+      alt="Watch AutoShorts demo"
+      width="720"
+    />
+  </a>
+</p>
+
+<p align="center">
+  <strong><a href="https://github.com/Sahil689172/AutoShorts/raw/main/public/v1.mp4">▶ Watch full demo (v1.mp4)</a></strong>
+</p>
+
+<p align="center">
   <video
-    src="https://raw.githubusercontent.com/Sahil689172/AutoShorts/main/public/demo.mp4"
+    src="https://github.com/Sahil689172/AutoShorts/raw/main/public/v1.mp4"
     controls
     width="720"
   >
-    <a href="https://raw.githubusercontent.com/Sahil689172/AutoShorts/main/public/demo.mp4">
-      Watch the AutoShorts demo
-    </a>
+    Your browser does not support embedded video.
+    <a href="https://github.com/Sahil689172/AutoShorts/raw/main/public/v1.mp4">Download v1.mp4</a>
   </video>
 </p>
 
@@ -44,14 +57,22 @@ Automatically generates:
 
 ## Screenshots
 
-### Create Studio
-
-Choose **Topic Mode** or paste a **Custom Script**. The studio UI guides you from idea to generation.
+### Landing — splash screen
 
 <p align="center">
   <img
-    src="https://raw.githubusercontent.com/Sahil689172/AutoShorts/main/public/image.png"
-    alt="Create Studio — topic and custom script modes"
+    src="./public/i.png"
+    alt="AutoShorts splash screen — Turn Ideas Into Shorts In Minutes"
+    width="720"
+  />
+</p>
+
+### Create Studio — topic & custom script
+
+<p align="center">
+  <img
+    src="./public/image.png"
+    alt="Create Studio — Topic Mode and Custom Script"
     width="720"
   />
 </p>

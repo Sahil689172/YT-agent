@@ -35,6 +35,10 @@ videos/
 
 # README demo assets (track files under public/)
 !public/
+!public/.gitkeep
+!public/i.png
+!public/image.png
+!public/v1.mp4
 !public/*.png
 !public/*.jpg
 !public/*.jpeg
