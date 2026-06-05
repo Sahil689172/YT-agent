@@ -33,6 +33,15 @@ videos/
 *.jpg
 *.jpeg
 
+# README demo assets (track files under public/)
+!public/
+!public/*.png
+!public/*.jpg
+!public/*.jpeg
+!public/*.mp4
+!public/*.webm
+!public/*.gif
+
 # Generated Captions
 
 captions/

@@ -24,11 +24,21 @@ Automatically generates:
 
 ---
 
-## Video
+## Demo
 
-<video src="public/demo.mp4" controls width="100%">
-  <a href="public/demo.mp4"></a>
-</video>
+<p align="center">
+  <video
+    src="https://raw.githubusercontent.com/Sahil689172/AutoShorts/main/public/demo.mp4"
+    controls
+    width="720"
+  >
+    <a href="https://raw.githubusercontent.com/Sahil689172/AutoShorts/main/public/demo.mp4">
+      Watch the AutoShorts demo
+    </a>
+  </video>
+</p>
+
+*Topic → script → voice → visuals → finished Short.*
 
 ---
 
@@ -38,7 +48,13 @@ Automatically generates:
 
 Choose **Topic Mode** or paste a **Custom Script**. The studio UI guides you from idea to generation.
 
-![Create Studio — topic and custom script modes](public/image.png)
+<p align="center">
+  <img
+    src="https://raw.githubusercontent.com/Sahil689172/AutoShorts/main/public/image.png"
+    alt="Create Studio — topic and custom script modes"
+    width="720"
+  />
+</p>
 
 ---
 
