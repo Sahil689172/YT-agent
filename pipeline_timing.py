@@ -20,7 +20,6 @@ PHASE_CAPTIONS = "Caption Generation"
 PHASE_SCENES = "Scene Agent"
 PHASE_ASSET_SEARCH = "Asset Search"
 PHASE_VIDEO = "Video Rendering"
-PHASE_THUMBNAIL = "Thumbnail Generation"
 PHASE_FINALIZATION = "Finalization"
 
 # Backward-compatible aliases used by main.py imports
@@ -43,7 +42,6 @@ SUMMARY_ORDER: tuple[str, ...] = (
     PHASE_SCENES,
     PHASE_ASSET_SEARCH,
     PHASE_VIDEO,
-    PHASE_THUMBNAIL,
     PHASE_FINALIZATION,
 )
 
@@ -64,7 +62,6 @@ def log_optimization_banner() -> None:
         "  • Metadata: 1 Ollama call (TITLE + DESCRIPTION + HASHTAGS)",
         "  • Scene Agent: 1 Ollama call per attempt (max 2 attempts), truncated script prompt",
         "  • Asset Search: parallel scenes, early-exit API search, 12 workers / 10 downloads",
-        "  • Thumbnail: reuses timeline assets or video frame (no new stock searches)",
         "  Targets: Metadata <15s | Scenes <20s | Assets <30s | Total <180s",
         "─" * 48,
     ]

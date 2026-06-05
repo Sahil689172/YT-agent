@@ -1,4 +1,4 @@
-"""CLI entry point for YouTube Shorts Phase 1–5: script through thumbnail generation."""
+"""CLI entry point for YouTube Shorts pipeline: script through final video."""
 
 import logging
 import sys
@@ -50,14 +50,6 @@ from script_generator import (
     ScriptGeneratorError,
     ScriptValidationError,
 )
-from agents.thumbnail_agent import (
-    FFmpegNotFoundError as ThumbnailFFmpegNotFoundError,
-    ThumbnailAgent,
-    ThumbnailAgentError,
-    ThumbnailRenderError,
-    TitleNotFoundError,
-    VisualSourceNotFoundError,
-)
 from voice_generator import (
     PiperNotFoundError,
     ScriptNotFoundError,
@@ -71,7 +63,6 @@ from pipeline_timing import (
     PHASE_METADATA,
     PHASE_SCENES,
     PHASE_SCRIPT_GENERATION,
-    PHASE_THUMBNAIL,
     PHASE_VOICE,
     PipelineTimer,
 )
@@ -107,8 +98,6 @@ def main() -> int:
     caption_generator = CaptionGenerator()
     scene_agent = SceneAgent()
     visual_timeline_agent = VisualTimelineAgent(topic=topic, timer=timer)
-    thumbnail_agent = ThumbnailAgent(topic=topic)
-
     try:
         with timer.track(PHASE_SCRIPT_GENERATION):
             logger.info("Phase 1: generating script")
@@ -272,28 +261,6 @@ def main() -> int:
         flush=True,
     )
 
-    try:
-        with timer.track(PHASE_THUMBNAIL):
-            logger.info("Phase 5: generating YouTube thumbnail")
-            print("\nPhase 5 — Thumbnail Agent")
-            thumb = thumbnail_agent.generate()
-    except TitleNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except VisualSourceNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except ThumbnailFFmpegNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except ThumbnailRenderError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-    except ThumbnailAgentError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"\nThumbnail saved -> {thumb.output_path}")
     timer.log_summary()
     return 0
 

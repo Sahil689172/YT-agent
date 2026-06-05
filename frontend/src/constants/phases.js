@@ -7,7 +7,6 @@ export const TOPIC_PHASES = [
   'Caption Generation',
   'Scene Generation',
   'Visual Timeline',
-  'Thumbnail Generation',
   'Finalization',
 ]
 
@@ -18,7 +17,6 @@ export const SCRIPT_PHASES = [
   'Caption Generation',
   'Scene Generation',
   'Visual Timeline',
-  'Thumbnail Generation',
   'Finalization',
 ]
 

@@ -29,9 +29,6 @@ videos/
 *.mov
 *.avi
 
-# Generated Thumbnails
-
-thumbnails/
 *.png
 *.jpg
 *.jpeg

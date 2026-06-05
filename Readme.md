@@ -1,6 +1,6 @@
 # AutoShorts
 
-**AI-powered Shorts studio** — Turn ideas or your own scripts into finished vertical videos with voice, captions, stock visuals, thumbnails, and publish-ready metadata. Local-first pipeline (Ollama, Piper, Whisper, FFmpeg) plus a premium React web UI for creation and progress tracking.
+**AI-powered Shorts studio** — Turn ideas or your own scripts into finished vertical videos with voice, captions, stock visuals, and publish-ready metadata. Local-first pipeline (Ollama, Piper, Whisper, FFmpeg) plus a premium React web UI for creation and progress tracking.
 
 > Previously documented as *YT-Agent*; the product UI and repo folder use **AutoShorts**.
 
@@ -11,9 +11,9 @@
 AutoShorts is a **content creation platform** with two ways to produce video:
 
 1. **AI Mode** — Start from a topic; the system writes the script and runs the full pipeline.
-2. **Custom Script Mode** — Start from your script; the system handles production from voice through thumbnail and metadata.
+2. **Custom Script Mode** — Start from your script; the system handles production from voice through video and metadata.
 
-Both modes share the same core engines: voice, captions, scene planning, visual asset selection, video assembly, and thumbnail generation. The platform runs on local hardware wherever possible (Ollama, Piper, Whisper, FFmpeg) and uses stock APIs for visuals.
+Both modes share the same core engines: voice, captions, scene planning, visual asset selection, and video assembly. The platform runs on local hardware wherever possible (Ollama, Piper, Whisper, FFmpeg) and uses stock APIs for visuals.
 
 ---
 
@@ -35,8 +35,6 @@ Scenes
 Visual Assets
   ↓
 Video
-  ↓
-Thumbnail
   ↓
 Metadata
 ```
@@ -60,8 +58,6 @@ Visual Assets
   ↓
 Video
   ↓
-Thumbnail
-  ↓
 Metadata
 ```
 
@@ -82,7 +78,6 @@ Metadata
 | Scene Agent | ✅ |
 | Visual Timeline Agent | ✅ |
 | Final Video Generation | ✅ |
-| Thumbnail Generation | ✅ (video frame → Pexels → Pixabay → AI) |
 
 ### Core components (shipped)
 
@@ -95,7 +90,6 @@ Metadata
 | Scene Agent | `agents/scene_agent.py` |
 | Visual Timeline Agent | `agents/visual_timeline_agent.py` |
 | Final Video Generation | `agents/visual_timeline_agent.py` (+ legacy `video_generator.py`) |
-| Thumbnail Generation | `agents/thumbnail_agent.py` |
 
 ### Upcoming
 
@@ -137,8 +131,6 @@ Visual Asset Selection
   ↓
 Video Generation
   ↓
-Thumbnail Generation
-  ↓
 Metadata Generation
 ```
 
@@ -161,8 +153,6 @@ Visual Asset Selection
   ↓
 Video Generation
   ↓
-Thumbnail Generation
-  ↓
 Metadata Generation
 ```
 
@@ -177,7 +167,6 @@ from voice_generator import VoiceGenerator
 from caption_generator import CaptionGenerator
 from agents.scene_agent import SceneAgent
 from agents.visual_timeline_agent import VisualTimelineAgent
-from agents.thumbnail_agent import ThumbnailAgent
 
 script = open("scripts/script.txt", encoding="utf-8").read()
 topic = "your video topic or niche label"
@@ -186,7 +175,6 @@ VoiceGenerator().generate()
 CaptionGenerator().generate()
 SceneAgent().generate()
 VisualTimelineAgent().generate()
-ThumbnailAgent().generate()
 MetadataGenerator().generate_and_save(script, topic)
 ```
 
@@ -222,7 +210,7 @@ videos/output.mp4
 | **Captions** | OpenAI Whisper (local, `base.en`) |
 | **Visual assets** | Pexels API (photos + videos), Pixabay API |
 | **Video** | FFmpeg, ffprobe |
-| **Thumbnails** | Pillow |
+| **Image verification** | Pillow |
 | **API** | FastAPI, Uvicorn |
 | **Frontend** | React 19, Vite, React Router, Tailwind CSS, Framer Motion, GSAP |
 | **Future upload** | YouTube Data API v3 (planned) |
@@ -243,25 +231,7 @@ videos/output.mp4
 | `assets/timeline/` | Cached stock clips / images |
 | `assets/cache/` | API search cache (24h) |
 | `videos/output.mp4` | Final video (1080×1920) |
-| `thumbnails/output.png` | Thumbnail (1280×720) |
-| `jobs/{job_id}/` | Per-run API artifacts (video, thumbnail, script, metadata, `performance.txt`) |
-
----
-
-## Thumbnail generation
-
-Thumbnails are built to **match the finished video**, not random scene stills. The agent logs the source as:
-
-`Thumbnail Source: Video Frame | Pexels | Pixabay | AI`
-
-### Priority order
-
-1. **Video Frame** — FFmpeg extracts several frames from `videos/output.mp4` (skipping intro/outro). Each frame is scored for **clarity**, **brightness**, **visual appeal**, and **subject visibility**. The highest-scoring frame becomes the background.
-2. **Pexels** — Landscape stock photo search using keywords from the video title and first scene (aligned with video content).
-3. **Pixabay** — Same query if Pexels has no suitable image.
-4. **AI** — Last resort only: a clean composed 1280×720 background tinted from timeline assets (not a generic AI photo).
-
-Bold title text is overlaid on every path. Output is always **1280×720** PNG.
+| `jobs/{job_id}/` | Per-run API artifacts (video, script, metadata, `performance.txt`) |
 
 ---
 
@@ -281,8 +251,7 @@ Caption Generation: 0.9 sec
 Scene Agent: 2.3 sec
 Asset Search: 14.2 sec
 Video Rendering: 31.7 sec
-Thumbnail Generation: 5.1 sec
-TOTAL: 77.9 sec
+TOTAL: 72.8 sec
 ```
 
 Timings appear in the **CLI terminal**, **FastAPI JSON logs** (`PERF` lines), and the **frontend processing screen** (`/progress/{job_id}` → `phase_timings`).
@@ -294,7 +263,7 @@ Timings appear in the **CLI terminal**, **FastAPI JSON logs** (`PERF` lines), an
 | Metadata | &lt; 15 sec | **One** Ollama call → `TITLE:` / `DESCRIPTION:` / `HASHTAGS:`; auto-merges 4+ description paragraphs to 2–3 |
 | Scene Agent | &lt; 20 sec | **One** Ollama JSON call (max 2 retries), truncated script in prompt |
 | Asset Search | &lt; 30 sec | Parallel per scene, early-exit (video first), 12 search / 10 download workers |
-| Total | &lt; 180 sec | Thumbnail reuses timeline assets or video frame (no new stock API) |
+| Total | &lt; 180 sec | Parallel asset search + script-first captions |
 
 Timings print at job start (optimization banner) and end (summary with OK/OVER vs targets).
 
@@ -302,7 +271,6 @@ Timings print at job start (optimization banner) and end (summary with OK/OVER v
 
 - **Visual timeline:** All scenes search in parallel; per scene, Pexels video is tried first, then Pexels image + Pixabay in parallel only if needed.
 - **Downloads:** Scene asset downloads run in parallel (file + topic cache).
-- **Thumbnail:** Uses `assets/timeline/` scene files or a frame from `videos/output.mp4` — no Pexels/Pixabay thumbnail searches.
 
 ### Faster captions (script-first)
 
@@ -320,7 +288,6 @@ Re-running the **same topic** reuses:
 
 - Downloaded timeline scene files (`assets/cache/topics/{hash}/`)
 - API search results (24h file cache under `assets/cache/`)
-- Cached thumbnail when available
 
 ### FFmpeg efficiency
 
@@ -359,7 +326,6 @@ AutoShorts/
 ├── agents/
 │   ├── scene_agent.py
 │   ├── visual_timeline_agent.py
-│   ├── thumbnail_agent.py
 │   ├── subtitle_config.py
 │   ├── visual_asset_agent.py       # legacy image-only path
 │   ├── topic_cache.py              # per-topic asset reuse
@@ -367,7 +333,7 @@ AutoShorts/
 ├── assets/
 │   ├── backgrounds/
 │   ├── cache/
-│   │   └── topics/                 # topic-hash scene + thumbnail cache
+│   │   └── topics/                 # topic-hash scene cache
 │   ├── clips/
 │   ├── scenes/
 │   └── timeline/
@@ -375,7 +341,6 @@ AutoShorts/
 ├── captions/
 ├── scenes/
 ├── scripts/
-├── thumbnails/
 ├── videos/
 ├── models/piper/
 ├── main.py                         # AI Mode — full pipeline
@@ -434,7 +399,7 @@ python main.py "Mastering capital expenditure for startups"
 ```text
 Topic or User Script
   ↓
-Production pipeline (voice → video → thumbnail)
+Production pipeline (voice → video → metadata)
   ↓
 Music Agent
   ↓
@@ -447,7 +412,7 @@ Automation Agent (scheduled runs)
 
 - One command from topic or script to publish-ready assets
 - Category-based background music
-- Automatic YouTube upload (video + thumbnail + metadata)
+- Automatic YouTube upload (video + metadata)
 - Fully scheduled, hands-off content creation
 
 ---
@@ -468,7 +433,7 @@ backend/
 
 Existing generators (unchanged):
   script_generator → metadata_generator → voice_generator →
-  caption_generator → scene_agent → visual_timeline_agent → thumbnail_agent
+  caption_generator → scene_agent → visual_timeline_agent
 ```
 
 ### Job lifecycle
@@ -483,7 +448,7 @@ GET /progress/{job_id}  (poll while running)
 GET /result/{job_id}    (when status is completed)
 ```
 
-Per-job artifacts are copied to `jobs/{job_id}/` (video, thumbnail, title, description, hashtags, script).
+Per-job artifacts are copied to `jobs/{job_id}/` (video, title, description, hashtags, script).
 
 ---
 
@@ -579,7 +544,7 @@ CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173`.
 2. Choose **Topic Mode** or **Custom Script**, submit → `POST /generate/topic` or `/generate/script` → store `job_id`
 3. Navigate to `/processing`; poll `GET /progress/{job_id}` every few seconds
 4. When `status` is `completed`, load `GET /result/{job_id}` on `/result`
-5. Use returned `video_path`, `thumbnail_path`, metadata, and performance fields in the UI
+5. Use returned `video_path`, metadata, and performance fields in the UI
 
 ### Frontend dependencies
 
@@ -601,14 +566,14 @@ The React app is a **premium studio experience**, not a dashboard. Routes:
 | `/` | **Landing** | White marketing home — hero, animated crowd, glass capability cards, pipeline, CTA |
 | `/create` | **Create studio** | Dark full-screen studio — topic or custom script → generation |
 | `/processing` | **Processing** | Live phase progress + performance timings |
-| `/result` | **Result** | Video, thumbnail, metadata, download/copy |
+| `/result` | **Result** | Video, metadata, download/copy |
 
 ### Landing page (`/`)
 
 - **Hero:** Headline, CTAs (Get Started → `/create`, Watch Demo), compact layout so the crowd is visible without scrolling.
 - **Crowd animation:** Open Peeps sprite sheet + GSAP (`CrowdCanvas`) — dense walking crowd in the lower viewport, layered depth, smooth motion.
 - **Capabilities:** Six features in **glassmorphism** cards (frosted blur, light borders).
-- **Pipeline:** Animated workflow steps (topic → voice → captions → scenes → visuals → video → thumbnail).
+- **Pipeline:** Animated workflow steps (topic → voice → captions → scenes → visuals → video).
 - **Theme:** White background, black typography (Inter).
 
 ### Create page (`/create`)
@@ -648,13 +613,13 @@ The React app (`frontend/`) talks to the FastAPI server over HTTP. No terminal i
          │ status = completed                                        │
          ▼                                                           ▼
 ┌─────────────────┐     GET /result/{id}                 jobs/{id}/output.mp4
-│  /result        │ ◄── video, thumbnail, metadata ─── thumbnails, scripts/
+│  /result        │ ◄── video, metadata ─── scripts/
 └─────────────────┘
 ```
 
 ### Topic Mode
 
-On `/create`, user picks **Topic Mode**, enters a Shorts topic (e.g. `What is EBITDA?`), and clicks **Generate**. The frontend calls `POST /generate/topic`. The backend runs the full pipeline: script → metadata → voice → captions → scenes → visual timeline → thumbnail.
+On `/create`, user picks **Topic Mode**, enters a Shorts topic (e.g. `What is EBITDA?`), and clicks **Generate**. The frontend calls `POST /generate/topic`. The backend runs the full pipeline: script → metadata → voice → captions → scenes → visual timeline → finalization.
 
 ### Custom Script Mode
 
@@ -667,7 +632,7 @@ User picks **Custom Script**, pastes plain narration (80–120 words recommended
 | Start | Store `job_id` in React context | Queue job, run pipeline in worker |
 | Progress | Poll `/progress/{job_id}` | Update `current_phase`, `completed` / `total` |
 | Done | Auto-navigate to Results | Copy artifacts to `jobs/{job_id}/` |
-| Display | Video/thumbnail via `/jobs/...` URLs | Static mount serves job files |
+| Display | Video via `/jobs/...` URLs | Static mount serves job files |
 
 ### Error handling (UI)
 

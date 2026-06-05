@@ -102,7 +102,6 @@ class ResultResponse(BaseModel):
     description: str | None = None
     hashtags: str | None = None
     video_path: str | None = None
-    thumbnail_path: str | None = None
     script_path: str | None = None
     error: str | None = None
     phase_timings: list[PhaseTimingResponse] = Field(default_factory=list)
@@ -227,7 +226,6 @@ def get_result(job_id: str) -> ResultResponse:
         description=data.get("description"),
         hashtags=data.get("hashtags"),
         video_path=data.get("video_path"),
-        thumbnail_path=data.get("thumbnail_path"),
         script_path=data.get("script_path"),
         phase_timings=data.get("phase_timings") or [],
         performance_summary=data.get("performance_summary") or [],

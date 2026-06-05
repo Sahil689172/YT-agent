@@ -1,4 +1,4 @@
-"""Topic-keyed cache for timeline assets, thumbnails, and search reuse."""
+"""Topic-keyed cache for timeline assets and search reuse."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 TOPIC_CACHE_ROOT = Path("assets/cache/topics")
 TIMELINE_DIR = Path("assets/timeline")
-THUMBNAIL_PATH = Path("thumbnails/output.png")
 
 
 def topic_cache_key(topic: str) -> str:
@@ -112,19 +111,3 @@ class TopicAssetCache:
         manifest["topic"] = self.topic
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
         self.manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
-    def save_thumbnail(self, thumbnail_path: Path = THUMBNAIL_PATH) -> None:
-        if not thumbnail_path.is_file():
-            return
-        self.root.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(thumbnail_path, self.root / "thumbnail.png")
-        logger.info("Topic cache: thumbnail saved for %s", self.key)
-
-    def try_restore_thumbnail(self, output_path: Path = THUMBNAIL_PATH) -> bool:
-        cached = self.root / "thumbnail.png"
-        if not cached.is_file():
-            return False
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(cached, output_path)
-        logger.info("Topic cache: thumbnail restored for %s", self.key)
-        return True

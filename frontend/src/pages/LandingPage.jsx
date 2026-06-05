@@ -8,7 +8,6 @@ import {
   Clapperboard,
   Search,
   Video,
-  Image,
   Play,
   ArrowRight,
   Mic,
@@ -44,11 +43,6 @@ const FEATURES = [
     description: 'Voice, captions, cuts, and export — one automated pass.',
     icon: Video,
   },
-  {
-    title: 'Thumbnail Creation',
-    description: 'Click-worthy covers from your timeline or AI fallback.',
-    icon: Image,
-  },
 ]
 
 const PIPELINE = [
@@ -58,7 +52,6 @@ const PIPELINE = [
   { label: 'Scenes', icon: Layers },
   { label: 'Visual Search', icon: Search },
   { label: 'Video', icon: Video },
-  { label: 'Thumbnail', icon: Image },
 ]
 
 const fadeUp = {
@@ -142,7 +135,7 @@ export default function LandingPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, delay: 0.22 }}
           >
-            Generate videos, thumbnails, captions, scenes, and metadata in minutes.
+            Generate videos, captions, scenes, and metadata in minutes.
           </motion.p>
           <motion.div
             className="mt-5 flex flex-wrap items-center justify-center gap-3 sm:gap-4"

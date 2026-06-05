@@ -16,7 +16,6 @@ from pipeline_timing import (
     PHASE_SCENES,
     PHASE_SCRIPT_GENERATION,
     PHASE_SCRIPT_PREPARATION,
-    PHASE_THUMBNAIL,
     PHASE_VOICE,
     PipelineTimer,
     log_optimization_banner,
@@ -104,15 +103,13 @@ def _run_topic_pipeline(
         lambda: _phase_visual_timeline(job_id, topic, timer, jm),
         track=False,
     )
-    step(phases[6], PHASE_THUMBNAIL, lambda: _phase_thumbnail(topic))
-
     result: JobResult | None = None
 
     def _finalize() -> None:
         nonlocal result
         result = jm.finalize_artifacts(job_id)
 
-    step(phases[7], PHASE_FINALIZATION, _finalize)
+    step(phases[6], PHASE_FINALIZATION, _finalize)
     if result is None:
         raise PipelineError("Finalization did not produce a result.", "Finalization")
     jm.update_performance(job_id, timer)
@@ -168,15 +165,13 @@ def _run_script_pipeline(
         lambda: _phase_visual_timeline(job_id, topic, timer, jm),
         track=False,
     )
-    step(phases[6], PHASE_THUMBNAIL, lambda: _phase_thumbnail(topic))
-
     result: JobResult | None = None
 
     def _finalize() -> None:
         nonlocal result
         result = jm.finalize_artifacts(job_id)
 
-    step(phases[7], PHASE_FINALIZATION, _finalize)
+    step(phases[6], PHASE_FINALIZATION, _finalize)
     if result is None:
         raise PipelineError("Finalization did not produce a result.", "Finalization")
     jm.update_performance(job_id, timer)
@@ -365,31 +360,6 @@ def _phase_visual_timeline(
         raise PipelineError(str(exc), "Visual Timeline") from exc
     except VisualTimelineAgentError as exc:
         raise PipelineError(str(exc), "Visual Timeline") from exc
-
-
-def _phase_thumbnail(topic: str) -> None:
-    from agents.thumbnail_agent import (
-        FFmpegNotFoundError as ThumbnailFFmpegNotFoundError,
-        ThumbnailAgent,
-        ThumbnailAgentError,
-        ThumbnailRenderError,
-        TitleNotFoundError,
-        VisualSourceNotFoundError,
-    )
-
-    thumbnail_agent = ThumbnailAgent(topic=topic)
-    try:
-        thumbnail_agent.generate()
-    except TitleNotFoundError as exc:
-        raise PipelineError(str(exc), "Thumbnail Generation") from exc
-    except VisualSourceNotFoundError as exc:
-        raise PipelineError(str(exc), "Thumbnail Generation") from exc
-    except ThumbnailFFmpegNotFoundError as exc:
-        raise PipelineError(str(exc), "Thumbnail Generation") from exc
-    except ThumbnailRenderError as exc:
-        raise PipelineError(str(exc), "Thumbnail Generation") from exc
-    except ThumbnailAgentError as exc:
-        raise PipelineError(str(exc), "Thumbnail Generation") from exc
 
 
 def _read_script() -> str:

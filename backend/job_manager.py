@@ -20,7 +20,6 @@ TITLE_PATH = ROOT_DIR / "scripts" / "title.txt"
 DESCRIPTION_PATH = ROOT_DIR / "scripts" / "description.txt"
 HASHTAGS_PATH = ROOT_DIR / "scripts" / "hashtags.txt"
 VIDEO_PATH = ROOT_DIR / "videos" / "output.mp4"
-THUMBNAIL_PATH = ROOT_DIR / "thumbnails" / "output.png"
 SCRIPT_PATH = ROOT_DIR / "scripts" / "script.txt"
 
 PHASES_TOPIC = [
@@ -30,7 +29,6 @@ PHASES_TOPIC = [
     "Caption Generation",
     "Scene Generation",
     "Visual Timeline",
-    "Thumbnail Generation",
     "Finalization",
 ]
 
@@ -41,7 +39,6 @@ PHASES_SCRIPT = [
     "Caption Generation",
     "Scene Generation",
     "Visual Timeline",
-    "Thumbnail Generation",
     "Finalization",
 ]
 
@@ -59,7 +56,6 @@ class JobResult:
     description: str = ""
     hashtags: str = ""
     video_path: str = ""
-    thumbnail_path: str = ""
     script_path: str = ""
 
 
@@ -71,7 +67,7 @@ class Job:
     phases: list[str] = field(default_factory=list)
     current_phase: str = "Queued"
     completed: int = 0
-    total: int = 8
+    total: int = 7
     topic: str = ""
     script: str = ""
     error: str | None = None
@@ -116,7 +112,6 @@ class Job:
             "description": self.result.description,
             "hashtags": self.result.hashtags,
             "video_path": self.result.video_path,
-            "thumbnail_path": self.result.thumbnail_path,
             "script_path": self.result.script_path,
             "status": self.status.value,
             "phase_timings": list(self.phase_timings),
@@ -277,7 +272,6 @@ class JobManager:
             (HASHTAGS_PATH, workspace / "hashtags.txt"),
             (SCRIPT_PATH, workspace / "script.txt"),
             (VIDEO_PATH, workspace / "output.mp4"),
-            (THUMBNAIL_PATH, workspace / "thumbnail.png"),
         ]
         for src, dest in copies:
             if src.is_file():
@@ -296,13 +290,10 @@ class JobManager:
         hashtags = hashtags_raw.strip()
 
         video_rel = f"jobs/{job_id}/output.mp4"
-        thumb_rel = f"jobs/{job_id}/thumbnail.png"
         script_rel = f"jobs/{job_id}/script.txt"
 
         if not (workspace / "output.mp4").is_file() and VIDEO_PATH.is_file():
             shutil.copy2(VIDEO_PATH, workspace / "output.mp4")
-        if not (workspace / "thumbnail.png").is_file() and THUMBNAIL_PATH.is_file():
-            shutil.copy2(THUMBNAIL_PATH, workspace / "thumbnail.png")
 
         _write_performance_file(job)
 
@@ -311,7 +302,6 @@ class JobManager:
             description=description.strip(),
             hashtags=hashtags,
             video_path=video_rel.replace("\\", "/"),
-            thumbnail_path=thumb_rel.replace("\\", "/"),
             script_path=script_rel.replace("\\", "/"),
         )
 

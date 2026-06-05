@@ -373,16 +373,6 @@ class PixabayClient:
         )
 
 
-def landscape_image_score(candidate: ImageCandidate) -> float:
-    """Rank stock photos for 1280×720 thumbnails."""
-    score = float(candidate.pixels)
-    if candidate.width >= candidate.height:
-        score *= 1.3
-    if candidate.width >= 1280 and candidate.height >= 720:
-        score *= 1.15
-    return score
-
-
 class VisualAssetAgent:
     """Download scene images from Pexels (primary) and Pixabay (fallback)."""
 

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   Film,
-  Image,
   Type,
   AlignLeft,
   Hash,
@@ -73,7 +72,6 @@ export default function ResultPage() {
   }
 
   const videoUrl = assetUrl(result.video_path)
-  const thumbUrl = assetUrl(result.thumbnail_path)
   const title = result.title || 'Untitled'
   const description = result.description || ''
   const hashtagList = parseHashtags(result.hashtags)
@@ -105,47 +103,31 @@ export default function ResultPage() {
       {error && <ErrorBanner title={error.title} message={error.message} />}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6">
-        <FloatingPanel title="Video Preview" icon={Film} delay={0.05} span="2">
+        <FloatingPanel title="Video Preview" icon={Film} delay={0.05} span="full">
           {videoUrl ? (
             <video
               src={videoUrl}
               controls
-              className="aspect-[9/16] max-h-[420px] w-full max-w-[280px] mx-auto rounded-xl neo-inset bg-black"
+              className="aspect-[9/16] max-h-[480px] w-full max-w-[280px] mx-auto rounded-xl neo-inset bg-black"
               playsInline
             />
           ) : (
             <MediaPlaceholder
-              aspect="aspect-[9/16] max-h-[420px] w-full max-w-[280px] mx-auto"
+              aspect="aspect-[9/16] max-h-[480px] w-full max-w-[280px] mx-auto"
               label="Video not available"
               icon={Film}
             />
           )}
         </FloatingPanel>
 
-        <FloatingPanel title="Thumbnail Preview" icon={Image} delay={0.1}>
-          {thumbUrl ? (
-            <img
-              src={thumbUrl}
-              alt="Generated thumbnail"
-              className="aspect-video w-full rounded-xl neo-inset object-cover"
-            />
-          ) : (
-            <MediaPlaceholder
-              aspect="aspect-video w-full"
-              label="Thumbnail not available"
-              icon={Image}
-            />
-          )}
-        </FloatingPanel>
-
-        <FloatingPanel title="Title" icon={Type} delay={0.15}>
+        <FloatingPanel title="Title" icon={Type} delay={0.1}>
           <div className="flex items-start justify-between gap-3">
             <p className="text-lg font-semibold text-white leading-snug flex-1">{title}</p>
             <CopyButton text={title} label="Copy" />
           </div>
         </FloatingPanel>
 
-        <FloatingPanel title="Description" icon={AlignLeft} delay={0.2} span="2">
+        <FloatingPanel title="Description" icon={AlignLeft} delay={0.15} span="2">
           <div className="flex flex-col gap-3">
             <p className="text-sm text-white/50 leading-relaxed whitespace-pre-wrap">
               {description}
@@ -154,7 +136,7 @@ export default function ResultPage() {
           </div>
         </FloatingPanel>
 
-        <FloatingPanel title="Hashtags" icon={Hash} delay={0.25}>
+        <FloatingPanel title="Hashtags" icon={Hash} delay={0.2}>
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
               {hashtagList.map((tag) => (
@@ -171,7 +153,7 @@ export default function ResultPage() {
         </FloatingPanel>
 
         {performanceLines.length > 0 && (
-          <FloatingPanel title="Performance" icon={Timer} delay={0.28} span="full">
+          <FloatingPanel title="Performance" icon={Timer} delay={0.25} span="full">
             <div className="space-y-3">
               <div className="font-mono text-sm text-white/65 space-y-1">
                 {performanceLines.map((line) => (
@@ -209,15 +191,6 @@ export default function ResultPage() {
               onClick={() => videoUrl && downloadFile(videoUrl, 'output.mp4')}
             >
               Download Video
-            </NeoButton>
-            <NeoButton
-              variant="secondary"
-              icon={Image}
-              className="flex-1 min-w-[160px]"
-              disabled={!thumbUrl}
-              onClick={() => thumbUrl && downloadFile(thumbUrl, 'thumbnail.png')}
-            >
-              Download Thumbnail
             </NeoButton>
             <NeoButton
               variant="secondary"
