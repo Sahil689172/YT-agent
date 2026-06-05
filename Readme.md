@@ -291,7 +291,7 @@ Timings appear in the **CLI terminal**, **FastAPI JSON logs** (`PERF` lines), an
 
 | Phase | Target | Technique |
 |-------|--------|-----------|
-| Metadata | &lt; 15 sec | **One** Ollama call → `TITLE:` / `DESCRIPTION:` / `HASHTAGS:` |
+| Metadata | &lt; 15 sec | **One** Ollama call → `TITLE:` / `DESCRIPTION:` / `HASHTAGS:`; auto-merges 4+ description paragraphs to 2–3 |
 | Scene Agent | &lt; 20 sec | **One** Ollama JSON call (max 2 retries), truncated script in prompt |
 | Asset Search | &lt; 30 sec | Parallel per scene, early-exit (video first), 12 search / 10 download workers |
 | Total | &lt; 180 sec | Thumbnail reuses timeline assets or video frame (no new stock API) |

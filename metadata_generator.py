@@ -24,7 +24,7 @@ COMBINED_SYSTEM = """You write YouTube Shorts metadata in one response.
 Rules:
 - Output exactly three labeled sections: TITLE, DESCRIPTION, HASHTAGS
 - TITLE: one line, catchy but not clickbait, under 70 characters, no quotes
-- DESCRIPTION: exactly 2 or 3 short paragraphs separated by a blank line, no hashtags
+- DESCRIPTION: 2 or 3 short paragraphs only (never 4+), separated by a blank line, no hashtags
 - HASHTAGS: exactly 10 lines, each starting with # (e.g. #Shorts)
 - No extra commentary outside the three sections"""
 
@@ -158,21 +158,39 @@ class MetadataGenerator:
             topic=topic,
             script=_script_for_prompt(script),
         )
-        raw = self._chat(COMBINED_SYSTEM, prompt)
-        title, description, hashtags = self._parse_combined_response(raw)
-        self._validate_title(title)
-        self._validate_description(description)
-        self._validate_hashtags(hashtags)
-        elapsed = time.perf_counter() - started
-        logger.info(
-            "Metadata generated in one call (%.2f sec): title=%d chars, "
-            "%d paragraphs, %d hashtags",
-            elapsed,
-            len(title),
-            len(self._paragraphs(description)),
-            len(hashtags),
-        )
-        return VideoMetadata(title=title, description=description, hashtags=hashtags)
+
+        last_validation_error: MetadataValidationError | None = None
+        for attempt in range(1, 3):
+            try:
+                raw = self._chat(COMBINED_SYSTEM, prompt)
+                title, description, hashtags = self._parse_combined_response(raw)
+                description = self._normalize_description(description)
+                self._validate_title(title)
+                self._validate_description(description)
+                self._validate_hashtags(hashtags)
+                elapsed = time.perf_counter() - started
+                logger.info(
+                    "Metadata generated in one call (%.2f sec, attempt %d): title=%d chars, "
+                    "%d paragraphs, %d hashtags",
+                    elapsed,
+                    attempt,
+                    len(title),
+                    len(self._paragraphs(description)),
+                    len(hashtags),
+                )
+                return VideoMetadata(
+                    title=title, description=description, hashtags=hashtags
+                )
+            except MetadataValidationError as exc:
+                last_validation_error = exc
+                logger.warning(
+                    "Metadata validation failed (attempt %d/2): %s",
+                    attempt,
+                    exc,
+                )
+
+        assert last_validation_error is not None
+        raise last_validation_error
 
     def save(self, metadata: VideoMetadata) -> tuple[Path, Path, Path]:
         """Write metadata files, creating the scripts directory if needed."""
@@ -295,6 +313,38 @@ class MetadataGenerator:
     @staticmethod
     def _paragraphs(text: str) -> list[str]:
         return [p.strip() for p in re.split(r"\n\s*\n+", text.strip()) if p.strip()]
+
+    def _normalize_description(self, description: str) -> str:
+        """Coerce description to 2–3 paragraphs without failing on minor LLM formatting drift."""
+        paragraphs = self._paragraphs(description)
+
+        while len(paragraphs) > 3:
+            merge_at = 0
+            merge_len = float("inf")
+            for i in range(len(paragraphs) - 1):
+                combined = len(paragraphs[i]) + len(paragraphs[i + 1])
+                if combined < merge_len:
+                    merge_len = combined
+                    merge_at = i
+            paragraphs[merge_at] = f"{paragraphs[merge_at]} {paragraphs[merge_at + 1]}".strip()
+            del paragraphs[merge_at + 1]
+            logger.info(
+                "Description normalized: merged paragraphs down to %d",
+                len(paragraphs),
+            )
+
+        if len(paragraphs) == 1:
+            sentences = re.split(r"(?<=[.!?])\s+", paragraphs[0].strip())
+            sentences = [s.strip() for s in sentences if s.strip()]
+            if len(sentences) >= 2:
+                mid = len(sentences) // 2
+                first = " ".join(sentences[:mid]).strip()
+                second = " ".join(sentences[mid:]).strip()
+                if first and second:
+                    paragraphs = [first, second]
+                    logger.info("Description normalized: split single block into 2 paragraphs")
+
+        return "\n\n".join(paragraphs)
 
     def _parse_hashtags(self, text: str) -> list[str]:
         tags: list[str] = []
