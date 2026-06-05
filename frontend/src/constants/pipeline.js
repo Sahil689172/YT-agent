@@ -37,6 +37,5 @@ export const PROCESSING_PHASES = [
 export const RESULT_PLACEHOLDER = {
   title: 'Your Video Title Will Appear Here',
   description:
-    'Your generated description will appear here — optimized for Shorts discovery, engagement hooks, and platform metadata when the pipeline is connected.',
-  hashtags: ['Shorts', 'ContentCreation', 'AutoShorts', 'YouTubeTips', 'Viral'],
+    'Your generated description will appear here — optimized for Shorts discovery and engagement.\n\n#Shorts #ContentCreation #AutoShorts #YouTubeTips #Viral\n#LearnOnYouTube #CreatorTips #VideoMarketing #SocialMedia #Growth',
 }

@@ -18,7 +18,6 @@ JOBS_DIR = ROOT_DIR / "jobs"
 # Standard output paths used by existing generators
 TITLE_PATH = ROOT_DIR / "scripts" / "title.txt"
 DESCRIPTION_PATH = ROOT_DIR / "scripts" / "description.txt"
-HASHTAGS_PATH = ROOT_DIR / "scripts" / "hashtags.txt"
 VIDEO_PATH = ROOT_DIR / "videos" / "output.mp4"
 SCRIPT_PATH = ROOT_DIR / "scripts" / "script.txt"
 
@@ -54,7 +53,6 @@ class JobStatus(str, Enum):
 class JobResult:
     title: str = ""
     description: str = ""
-    hashtags: str = ""
     video_path: str = ""
     script_path: str = ""
 
@@ -90,11 +88,7 @@ class Job:
             "completed": self.completed,
             "total": self.total,
             "status": self.status.value,
-            "phase_timings": list(self.phase_timings),
-            "performance_summary": list(self.performance_summary),
         }
-        if self.total_duration_seconds is not None:
-            data["total_duration_seconds"] = round(self.total_duration_seconds, 2)
         if self.status == JobStatus.FAILED and self.error:
             data["error"] = self.error
         return data
@@ -110,13 +104,9 @@ class Job:
             "job_id": self.job_id,
             "title": self.result.title,
             "description": self.result.description,
-            "hashtags": self.result.hashtags,
             "video_path": self.result.video_path,
             "script_path": self.result.script_path,
             "status": self.status.value,
-            "phase_timings": list(self.phase_timings),
-            "performance_summary": list(self.performance_summary),
-            "total_duration_seconds": self.total_duration_seconds,
         }
 
 
@@ -269,7 +259,6 @@ class JobManager:
         copies = [
             (TITLE_PATH, workspace / "title.txt"),
             (DESCRIPTION_PATH, workspace / "description.txt"),
-            (HASHTAGS_PATH, workspace / "hashtags.txt"),
             (SCRIPT_PATH, workspace / "script.txt"),
             (VIDEO_PATH, workspace / "output.mp4"),
         ]
@@ -284,10 +273,6 @@ class JobManager:
         description = _read_text(workspace / "description.txt")
         if not description and DESCRIPTION_PATH.is_file():
             description = DESCRIPTION_PATH.read_text(encoding="utf-8")
-        hashtags_raw = _read_text(workspace / "hashtags.txt")
-        if not hashtags_raw and HASHTAGS_PATH.is_file():
-            hashtags_raw = HASHTAGS_PATH.read_text(encoding="utf-8")
-        hashtags = hashtags_raw.strip()
 
         video_rel = f"jobs/{job_id}/output.mp4"
         script_rel = f"jobs/{job_id}/script.txt"
@@ -300,7 +285,6 @@ class JobManager:
         return JobResult(
             title=title.strip(),
             description=description.strip(),
-            hashtags=hashtags,
             video_path=video_rel.replace("\\", "/"),
             script_path=script_rel.replace("\\", "/"),
         )

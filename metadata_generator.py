@@ -16,8 +16,8 @@ DEFAULT_MODEL = "llama3"
 SCRIPTS_DIR = Path("scripts")
 TITLE_PATH = SCRIPTS_DIR / "title.txt"
 DESCRIPTION_PATH = SCRIPTS_DIR / "description.txt"
-HASHTAGS_PATH = SCRIPTS_DIR / "hashtags.txt"
 HASHTAG_COUNT = 10
+HASHTAGS_PER_LINE = 5
 MAX_SCRIPT_CHARS_IN_PROMPT = 3500
 
 COMBINED_SYSTEM = """You write YouTube Shorts metadata in one response.
@@ -25,7 +25,7 @@ Rules:
 - Output exactly three labeled sections: TITLE, DESCRIPTION, HASHTAGS
 - TITLE: one line, catchy but not clickbait, under 70 characters, no quotes
 - DESCRIPTION: 2 or 3 short paragraphs only (never 4+), separated by a blank line, no hashtags
-- HASHTAGS: exactly 10 lines, each starting with # (e.g. #Shorts)
+- HASHTAGS: exactly 10 tags, each starting with #; relevant to topic, script content, and niche/category (e.g. finance → #finance #investing; coding → #coding #programming; AI → #ai #aitools)
 - No extra commentary outside the three sections"""
 
 COMBINED_USER_TEMPLATE = """Topic: {topic}
@@ -46,7 +46,7 @@ DESCRIPTION:
 HASHTAGS:
 #tag1
 #tag2
-(... 10 hashtags total)"""
+(... exactly 10 hashtags, one per line)"""
 
 # Legacy prompts kept for optional individual generators / tests
 TITLE_SYSTEM = """You write YouTube Shorts titles.
@@ -73,8 +73,8 @@ Rules:
 - Output exactly 10 hashtags
 - One hashtag per line
 - Each line starts with # (e.g. #Shorts)
-- Relevant to the script topic and niche
-- Mix of broad and specific tags
+- Relevant to the script topic, video content, and category/niche
+- Mix of broad and specific tags (e.g. finance: #finance #investing; coding: #coding #programming; AI: #ai #aitools)
 - No numbering, bullets, or extra commentary"""
 
 
@@ -121,12 +121,10 @@ class MetadataGenerator:
         model: str = DEFAULT_MODEL,
         title_path: Path | str = TITLE_PATH,
         description_path: Path | str = DESCRIPTION_PATH,
-        hashtags_path: Path | str = HASHTAGS_PATH,
     ) -> None:
         self.model = model
         self.title_path = Path(title_path)
         self.description_path = Path(description_path)
-        self.hashtags_path = Path(hashtags_path)
 
     def generate_title(self, script: str, topic: str) -> str:
         """Generate a YouTube title from script context (legacy single-field call)."""
@@ -192,16 +190,15 @@ class MetadataGenerator:
         assert last_validation_error is not None
         raise last_validation_error
 
-    def save(self, metadata: VideoMetadata) -> tuple[Path, Path, Path]:
-        """Write metadata files, creating the scripts directory if needed."""
+    def save(self, metadata: VideoMetadata) -> tuple[Path, Path]:
+        """Write title.txt and description.txt (hashtags appended to description)."""
         try:
             self.title_path.parent.mkdir(parents=True, exist_ok=True)
             self.title_path.write_text(metadata.title.strip() + "\n", encoding="utf-8")
             self.description_path.write_text(
-                metadata.description.strip() + "\n", encoding="utf-8"
+                self._compose_description_file(metadata.description, metadata.hashtags),
+                encoding="utf-8",
             )
-            hashtag_body = "\n".join(metadata.hashtags) + "\n"
-            self.hashtags_path.write_text(hashtag_body, encoding="utf-8")
         except OSError as exc:
             raise MetadataGeneratorError(f"Failed to save metadata: {exc}") from exc
 
@@ -209,14 +206,24 @@ class MetadataGenerator:
         return (
             self.title_path.resolve(),
             self.description_path.resolve(),
-            self.hashtags_path.resolve(),
         )
 
-    def generate_and_save(self, script: str, topic: str) -> tuple[VideoMetadata, Path, Path, Path]:
-        """Generate metadata and write title, description, and hashtag files."""
+    def generate_and_save(self, script: str, topic: str) -> tuple[VideoMetadata, Path, Path]:
+        """Generate metadata and write title + description (with hashtags) files."""
         metadata = self.generate(script, topic)
         paths = self.save(metadata)
         return metadata, *paths
+
+    @staticmethod
+    def _format_hashtag_block(hashtags: list[str]) -> str:
+        """Format 10 hashtags as two lines of five, space-separated."""
+        line1 = " ".join(hashtags[:HASHTAGS_PER_LINE])
+        line2 = " ".join(hashtags[HASHTAGS_PER_LINE:HASHTAG_COUNT])
+        return f"{line1}\n{line2}"
+
+    def _compose_description_file(self, body: str, hashtags: list[str]) -> str:
+        """Build description.txt: paragraphs, blank line, then hashtag block."""
+        return f"{body.strip()}\n\n{self._format_hashtag_block(hashtags)}\n"
 
     def _parse_combined_response(self, raw: str) -> tuple[str, str, list[str]]:
         text = raw.strip()
@@ -389,6 +396,10 @@ class MetadataGenerator:
     def _validate_description(self, description: str) -> None:
         if not description:
             raise MetadataValidationError("Description is empty.")
+        if re.search(r"#\w+", description):
+            raise MetadataValidationError(
+                "Description must not contain hashtags (they are appended on save)."
+            )
         paragraphs = self._paragraphs(description)
         if len(paragraphs) < 2 or len(paragraphs) > 3:
             raise MetadataValidationError(

@@ -94,12 +94,3 @@ export async function getProgress(jobId) {
 export async function getResult(jobId) {
   return request(`/result/${jobId}`)
 }
-
-export function parseHashtags(hashtagsRaw) {
-  if (!hashtagsRaw) return []
-  return hashtagsRaw
-    .split(/\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((tag) => tag.replace(/^#/, ''))
-}

@@ -43,29 +43,14 @@ function reducer(state, action) {
       }
     case 'SET_PROGRESS':
       return { ...state, progress: action.payload, error: null }
-    case 'SET_RESULT': {
-      const payload = action.payload
-      const progress = state.progress
-      const merged = { ...payload }
-      if (progress) {
-        if (!merged.phase_timings?.length && progress.phase_timings?.length) {
-          merged.phase_timings = progress.phase_timings
-        }
-        if (!merged.performance_summary?.length && progress.performance_summary?.length) {
-          merged.performance_summary = progress.performance_summary
-        }
-        if (merged.total_duration_seconds == null && progress.total_duration_seconds != null) {
-          merged.total_duration_seconds = progress.total_duration_seconds
-        }
-      }
+    case 'SET_RESULT':
       return {
         ...state,
-        result: merged,
-        progress,
+        result: action.payload,
+        progress: state.progress,
         loading: false,
         error: null,
       }
-    }
     case 'SET_ERROR':
       return { ...state, error: action.payload, loading: false }
     default:

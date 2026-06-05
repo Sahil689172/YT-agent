@@ -14,7 +14,6 @@ import {
   TOPIC_PHASES,
   SCRIPT_PHASES,
   buildTerminalLogs,
-  buildPerformanceLines,
   progressPercent,
 } from '../constants/phases'
 
@@ -97,11 +96,6 @@ export default function ProcessingPage() {
     })
   }, [phases, progress])
 
-  const performanceLines = useMemo(
-    () => buildPerformanceLines(progress),
-    [progress],
-  )
-
   const percent = progress
     ? progressPercent(progress.completed, progress.total)
     : 0
@@ -165,30 +159,6 @@ export default function ProcessingPage() {
         lines={terminalLines}
         activeLineIndex={activeLineIndex >= 0 ? activeLineIndex : -1}
       />
-
-      {performanceLines.length > 0 && (
-        <motion.div
-          className="neo-panel rounded-2xl p-5 font-mono text-sm text-white/70 space-y-1"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <p className="text-white/45 text-xs uppercase tracking-wider mb-2">
-            Performance
-          </p>
-          {performanceLines.map((line) => (
-            <p
-              key={line}
-              className={
-                line.startsWith('TOTAL:')
-                  ? 'text-emerald-400/90 pt-2 border-t border-white/10 mt-2'
-                  : ''
-              }
-            >
-              {line}
-            </p>
-          ))}
-        </motion.div>
-      )}
 
       {isRunning && !displayError && (
         <div className="flex items-center justify-center gap-2 text-white/40 text-sm">

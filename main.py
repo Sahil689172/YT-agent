@@ -127,7 +127,7 @@ def main() -> int:
     try:
         with timer.track(PHASE_METADATA):
             logger.info("Phase 1: generating metadata")
-            metadata, title_path, description_path, hashtags_path = (
+            metadata, title_path, description_path = (
                 metadata_generator.generate_and_save(script, topic)
             )
     except MetadataOllamaConnectionError as exc:
@@ -146,8 +146,7 @@ def main() -> int:
 
     print("Metadata saved")
     print(f"  Title:       {title_path}")
-    print(f"  Description: {description_path}")
-    print(f"  Hashtags:    {hashtags_path}")
+    print(f"  Description: {description_path} (includes 10 hashtags)")
     print(f"  Title preview: {metadata.title}")
 
     try:

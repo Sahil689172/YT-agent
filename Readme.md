@@ -39,7 +39,7 @@ Video
 Metadata
 ```
 
-**Today:** Fully supported via `python main.py "your topic"`. Metadata (title, description, hashtags) is generated in Phase 1 immediately after the script.
+**Today:** Fully supported via `python main.py "your topic"`. Metadata (title + description with 10 hashtags) is generated in Phase 1 immediately after the script.
 
 ---
 
@@ -223,8 +223,7 @@ videos/output.mp4
 |------|-------------|
 | `scripts/script.txt` | Narration script |
 | `scripts/title.txt` | Video title |
-| `scripts/description.txt` | Video description |
-| `scripts/hashtags.txt` | Hashtags (one per line) |
+| `scripts/description.txt` | Video description + 10 hashtags (ready for YouTube paste) |
 | `audio/output.wav` | Narration audio |
 | `captions/output.srt` | Shorts-style subtitles |
 | `scenes/scenes.json` | Scene plan |
@@ -232,6 +231,21 @@ videos/output.mp4
 | `assets/cache/` | API search cache (24h) |
 | `videos/output.mp4` | Final video (1080×1920) |
 | `jobs/{job_id}/` | Per-run API artifacts (video, script, metadata, `performance.txt`) |
+
+### Metadata format (`description.txt`)
+
+Description paragraphs are followed by a blank line, then exactly **10 hashtags** in two lines of five (space-separated):
+
+```text
+First paragraph of the description.
+
+Second paragraph of the description.
+
+#tag1 #tag2 #tag3 #tag4 #tag5
+#tag6 #tag7 #tag8 #tag9 #tag10
+```
+
+Hashtags are relevant to the topic, video content, and category (e.g. finance, coding, AI). The API `description` field returns this full text — no separate hashtag file or field.
 
 ---
 
@@ -254,7 +268,7 @@ Video Rendering: 31.7 sec
 TOTAL: 72.8 sec
 ```
 
-Timings appear in the **CLI terminal**, **FastAPI JSON logs** (`PERF` lines), and the **frontend processing screen** (`/progress/{job_id}` → `phase_timings`).
+Timings appear in the **CLI terminal**, **FastAPI JSON logs** (`PERF` lines), and per-job `jobs/{job_id}/performance.txt`. They are **not** exposed in API responses or the web UI.
 
 ### Optimization sprint (runtime targets)
 
@@ -448,7 +462,7 @@ GET /progress/{job_id}  (poll while running)
 GET /result/{job_id}    (when status is completed)
 ```
 
-Per-job artifacts are copied to `jobs/{job_id}/` (video, title, description, hashtags, script).
+Per-job artifacts are copied to `jobs/{job_id}/` (video, title, description with hashtags, script).
 
 ---
 
@@ -460,7 +474,7 @@ Per-job artifacts are copied to `jobs/{job_id}/` (video, title, description, has
 | `POST` | `/generate/topic` | Full pipeline from topic → `{ job_id, status }` |
 | `POST` | `/generate/script` | Pipeline from user script (skips script generation) |
 | `GET` | `/progress/{job_id}` | Live phase, `completed` / `total`, status |
-| `GET` | `/result/{job_id}` | Title, description, hashtags, file paths |
+| `GET` | `/result/{job_id}` | Title, description (includes hashtags), file paths |
 
 ### Example requests
 
@@ -544,7 +558,7 @@ CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173`.
 2. Choose **Topic Mode** or **Custom Script**, submit → `POST /generate/topic` or `/generate/script` → store `job_id`
 3. Navigate to `/processing`; poll `GET /progress/{job_id}` every few seconds
 4. When `status` is `completed`, load `GET /result/{job_id}` on `/result`
-5. Use returned `video_path`, metadata, and performance fields in the UI
+5. Use returned `video_path`, `title`, `description`, and `status` in the UI
 
 ### Frontend dependencies
 
@@ -565,8 +579,8 @@ The React app is a **premium studio experience**, not a dashboard. Routes:
 |-------|------|-------------|
 | `/` | **Landing** | White marketing home — hero, animated crowd, glass capability cards, pipeline, CTA |
 | `/create` | **Create studio** | Dark full-screen studio — topic or custom script → generation |
-| `/processing` | **Processing** | Live phase progress + performance timings |
-| `/result` | **Result** | Video, metadata, download/copy |
+| `/processing` | **Processing** | Live phase progress and status |
+| `/result` | **Result** | Video, metadata, status, download/copy |
 
 ### Landing page (`/`)
 
@@ -591,7 +605,8 @@ Inspired by high-end agency landings (e.g. Mainframe-style interaction), adapted
 ### Processing & result
 
 - Dark neumorphic UI (existing `AppShell` on `/processing` and `/result`).
-- Processing shows **phase timings** and optimization summary when the API provides `phase_timings` / `performance_summary`.
+- Processing shows phase names and completion progress only — no runtime breakdowns.
+- Result shows video preview, title, description (with hashtags), generation status, and download.
 
 ---
 

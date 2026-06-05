@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -76,13 +75,6 @@ class HealthResponse(BaseModel):
     status: str = "ok"
 
 
-class PhaseTimingResponse(BaseModel):
-    label: str
-    start_time: str
-    end_time: str
-    duration_seconds: float
-
-
 class ProgressResponse(BaseModel):
     job_id: str
     current_phase: str
@@ -90,9 +82,6 @@ class ProgressResponse(BaseModel):
     total: int
     status: str
     error: str | None = None
-    phase_timings: list[PhaseTimingResponse] = Field(default_factory=list)
-    performance_summary: list[str] = Field(default_factory=list)
-    total_duration_seconds: float | None = None
 
 
 class ResultResponse(BaseModel):
@@ -100,13 +89,9 @@ class ResultResponse(BaseModel):
     status: str
     title: str | None = None
     description: str | None = None
-    hashtags: str | None = None
     video_path: str | None = None
     script_path: str | None = None
     error: str | None = None
-    phase_timings: list[PhaseTimingResponse] = Field(default_factory=list)
-    performance_summary: list[str] = Field(default_factory=list)
-    total_duration_seconds: float | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -186,9 +171,6 @@ def get_progress(job_id: str) -> ProgressResponse:
         total=data["total"],
         status=_public_status(job.status),
         error=data.get("error") or job.error,
-        phase_timings=data.get("phase_timings") or [],
-        performance_summary=data.get("performance_summary") or [],
-        total_duration_seconds=data.get("total_duration_seconds"),
     )
 
 
@@ -224,12 +206,8 @@ def get_result(job_id: str) -> ResultResponse:
         status=data["status"],
         title=data.get("title"),
         description=data.get("description"),
-        hashtags=data.get("hashtags"),
         video_path=data.get("video_path"),
         script_path=data.get("script_path"),
-        phase_timings=data.get("phase_timings") or [],
-        performance_summary=data.get("performance_summary") or [],
-        total_duration_seconds=data.get("total_duration_seconds"),
     )
 
 

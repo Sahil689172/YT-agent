@@ -40,7 +40,7 @@ Open `http://localhost:5173`
 1. **Topic Mode** — `POST /generate/topic` → `job_id` → `/processing`
 2. **Custom Script** — sanitize script → `POST /generate/script` → `job_id` → `/processing`
 3. **Processing** — poll `GET /progress/{job_id}` every 2s
-4. **Result** — on `status: completed`, `GET /result/{job_id}` → video + metadata (title, description, hashtags)
+4. **Result** — on `status: completed`, `GET /result/{job_id}` → video + metadata (title, description with hashtags)
 
 State (`job_id`, progress, result, errors) lives in `GenerationContext` — no full page reload.
 
