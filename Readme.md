@@ -24,52 +24,6 @@ Automatically generates:
 
 ---
 
-## Demo
-
-<p align="center">
-  <a href="https://github.com/Sahil689172/AutoShorts/raw/main/public/v1.mp4">
-    <img
-      src="./public/i.png"
-
-https://github.com/user-attachments/assets/0100e3cc-c192-4e7f-859d-21e75c1d7ae6
-
-
-      alt="Watch AutoShorts demo"
-      width="720"
-    />
-  </a>
-</p>
-
-<p align="center">
-  <strong><a href="https://github.com/Sahil689172/AutoShorts/raw/main/public/v1.mp4">▶ Watch full demo (v1.mp4)</a></strong>
-</p>
-
-<p align="center">
-  <video
-    src="https://github.com/Sahil689172/AutoShorts/raw/main/public/v1.mp4"
-    controls
-    width="720"
-  >
-    Your browser does not support embedded video.
-    <a href="https://github.com/Sahil689172/AutoShorts/raw/main/public/v1.mp4">Download v1.mp4</a>
-  </video>
-</p>
-
-*Topic → script → voice → visuals → finished Short.*
-
----
-
-## Screenshots
-
-### Landing — splash screen
-
-<p align="center">
-  <img
-    src="./public/i.png"
-    alt="AutoShorts splash screen — Turn Ideas Into Shorts In Minutes"
-    width="720"
-  />
-</p>
 
 ### Create Studio — topic & custom script
 
