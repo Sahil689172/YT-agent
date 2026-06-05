@@ -205,6 +205,8 @@ class VoiceGenerator:
                 command,
                 input=script_text,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 timeout=timeout,
                 cwd=str(self.piper_dir),

@@ -28,7 +28,21 @@ class StructuredFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False)
 
 
+def _configure_stdio_utf8() -> None:
+    """Avoid Windows charmap errors when logs or prints contain non-ASCII text."""
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
 def configure_logging(level: int = logging.INFO) -> None:
+    _configure_stdio_utf8()
     root = logging.getLogger()
     root.setLevel(level)
     root.handlers.clear()
