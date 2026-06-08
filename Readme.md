@@ -24,18 +24,6 @@ Automatically generates:
 
 ---
 
-## Demo
-
-| Step | Action |
-|:----:|--------|
-| **1** | Open [**Edit Readme.md on GitHub**](https://github.com/Sahil689172/AutoShorts/edit/main/Readme.md) |
-| **2** | Delete this table |
-| **3** | Drag **`v1.mp4`** from your computer into the Demo section |
-| **4** | Commit — GitHub inserts an **inline video player** (not a download link) |
-
-*Topic → script → voice → visuals → finished Short.*
-
----
 
 ## Real-World Usage
 
